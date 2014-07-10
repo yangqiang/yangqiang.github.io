@@ -18,4 +18,9 @@ function fancyAlert(arg) {
 }
 ```
 
+{% highlight scala %}  
+val a = 1
+val b = 2
+{% endhighlight %}
+
 [Refer to](https://help.github.com/articles/markdown-basics)
