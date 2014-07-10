@@ -4,6 +4,8 @@ permalink: /:categories/:year/:month/:day/:title
 
 exclude: [".rvmrc", ".rbenv-version", "README.md", "Rakefile", "changelog.md"]
 hightlighter: pygments
+mardown: redcarpet
+extensions: ["fenced_code_blocks", "tables", "highlight", "strikethrough"]
 
 # Themes are encouraged to use these universal variables 
 # so be sure to set them if your theme uses them.
@@ -93,7 +95,6 @@ JB :
       num_posts: 5
       width: 580
       colorscheme: light
-      mardown: redcarpet
    
   # Settings for analytics helper
   # Set 'provider' to the analytics provider you want to use.
