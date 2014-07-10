@@ -93,6 +93,7 @@ JB :
       num_posts: 5
       width: 580
       colorscheme: light
+      mardown: redcarpet
    
   # Settings for analytics helper
   # Set 'provider' to the analytics provider you want to use.
