@@ -18,7 +18,7 @@ function fancyAlert(arg) {
 }
 ```
 
-{% highlight scala %}  
+{% highlight scala linenum %}  
 val a = 1
 val b = 2
 {% endhighlight %}
