@@ -1,0 +1,8 @@
+---
+layout: page
+title: A techblog
+tagline: What is tagline
+---
+{% include JB/setup %}
+
+h1. Welcome!
