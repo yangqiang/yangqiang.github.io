@@ -18,9 +18,16 @@ function fancyAlert(arg) {
 }
 ```
 
-{% highlight scala linenos %}  
+<pre class="prettyprint scala linenums">
 val a = 1
-val b = 2
-{% endhighlight %}
+val b = 1
+val c = 1
+val d = 1
+val e = 1
+val f = 1
+object oa {
+}
+</pre>
+
 
 [Refer to](https://help.github.com/articles/markdown-basics)
