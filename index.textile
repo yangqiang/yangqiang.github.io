@@ -6,3 +6,5 @@ tagline: What is tagline
 {% include JB/setup %}
 
 h1. Welcome!
+
+感谢朱玮~
