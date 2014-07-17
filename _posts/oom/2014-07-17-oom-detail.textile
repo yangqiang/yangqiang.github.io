@@ -1,0 +1,65 @@
+---
+layout: post
+title: "Spark OOM 错误分析：从 sortByKey 开始观察"
+description: ""
+category: BigData
+tags: [Spark, OOM]
+summary: 使用sortByKey()方法来构造OOM场景，从spark-shell的日志信息分析OOM出现的阶段及原因
+---
+{% include JB/setup %}
+
+h2. 背景
+
+spark 版本：1.0.0
+集群设置：一主二从
+Worker 配置：
+
+<pre>
+spark.executor.memory 1g
+spark.default.parallelism 2
+</pre>
+
+sort负载运行方式：
+
+* spark-shell 中输入相关scala代码
+* 输入数据规模：4.84GB
+* scala 语句
+
+<pre class="prettyprint java">
+val lines = sc.textFile("/test/OS_ORDER_ITEM.txt", 1)
+val data_map = lines.map(line => {(line, 1)})
+val result = data_map.sortByKey().map{line => line._1}
+result.count
+</pre>
+
+h2. 运行阶段
+
+* 启动 spark-shell 之后，显示 driver 端的 Memory Store 可支配的内存大小为：294.4 MB ，每个 worker 节点可以用于 block manager 的内存为 588.8 MB 。相关信息： _storage.BlockManagerInfo: Registering block manager sg201:45196 with 294.4 MB RAM_ 和 _Registering block manager sg211:52781 with 588.8 MB RAM_ 这个节点主要工作包括：
+** 启动各项服务，初始化运行环境，如 akka 连接，创建本地数据存放目录。
+** 创建 SparkContext 对象 sc
+
+* 第一步：从HDFS读数据到RDD，相关代码： _val data_malines = sc.textFile("/test/OS_ORDER_ITEM.txt", 8)_ 。这一步，几乎是瞬间完成的，其实数据并没有从HDFS复制到RDD，毕竟单纯从磁盘load 4.84 GB 数据到内存都需要若干秒钟的时间。重要日志信息： *<notextile> org.apache.spark.rdd.RDD[String] = MappedRDD[1] at textFile at <console>:12 </notextile>*
+* 第二步：转化RDD，相关代码： _val data_map = lines.map(line => {(line, 1)})_ .。也是瞬间完成的，核心日志： *<notextile> data_map: org.apache.spark.rdd.RDD[(String, Int)] = MappedRDD[2] at map at <console>:14 </notextile>*
+* 第三步：排序，代码： _val result = data_map.sortByKey().map{line => line._1}_ ，这一步会提交 Job ，相关信息如下：
+
+<pre>
+14/07/17 16:45:21,936 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+14/07/17 16:45:21,936 WARN snappy.LoadSnappy: Snappy native library not loaded
+14/07/17 16:45:21,953 INFO mapred.FileInputFormat: Total input paths to process : 1
+14/07/17 16:45:21,976 INFO spark.SparkContext: Starting job: sortByKey at <console>:16
+</pre>
+
+Job ID 为 0 ，这一步还会分析 HDFS 上的文件，将文件划分为 78 个块，意味着需要 78 个 task 来完成排序任务（这 78 个 task 被放在 0.0 号 TaskSet 中，TaskSet 、 Stage 、 Job 概念相近），最后返回的结果类型为 ResultTask ，相关日志如下：
+
+<pre>
+scheduler.DAGScheduler: Got job 0 (sortByKey at <console>:16) with 78 output partitions (allowLocal=false)
+</pre>
+
+问题：这一步，装入RDD的是否只是 partition 信息，意味着磁盘的数据并没有装入内存？（全部装入内存也是不现实的，4.84 GB > 1.0 GB * 2 ）
+
+Job 1 做的是对每个 partition 做排序，但是并不会真正的做排序，而只是将此操作写入 dependency 然后创建了新的 RDD 对象： result
+
+问题：如果执行 persist(MEMORY_ONLY) 应该会产生 OOM，这个操作会触发从 DISK 读入 Memory 的过程？
+答：不会触发 OOM ，执行了这行代码： *val rm = result.persist(org.apache.spark.storage.StorageLevel.MEMORY_ONLY)* ，因为没有 action 操作。
+
+问题： lines 直接做 count 流程如何？
