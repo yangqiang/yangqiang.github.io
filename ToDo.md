@@ -15,3 +15,5 @@ title: 待做事项
 8. <strike>搜索功能无效，考虑关闭此功能：```vi _includes/themes/bootstrap-3/default.html```</strike>
   也可以替换为google或百度搜索。
 9. Markdown for vim, Markdown plain text
+
+Updated on github.com
