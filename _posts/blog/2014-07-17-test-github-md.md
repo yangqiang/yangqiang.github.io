@@ -7,6 +7,6 @@ tags: [GitHub, Markdown]
 summary: 
 ---
 
-<pre>
+```
 测试一下
-<pre>
+```
