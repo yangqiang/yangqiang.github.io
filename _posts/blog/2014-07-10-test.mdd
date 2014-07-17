@@ -49,6 +49,7 @@ println(a)
 </pre>
 
 **Python 语言**
+
 <pre class="prettyprint c linenums">
 a = "hello"
 print a
