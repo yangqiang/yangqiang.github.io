@@ -17,3 +17,4 @@ title: 待做事项
 9. Markdown for vim, Markdown plain text
 
 Updated on github.com
+Changed yanqiang.github.com to yangqiang.github.io
