@@ -83,10 +83,9 @@ JB :
   #
   comments :
     provider : disqus
-    provider : false
+    # provider : false
     disqus :
-      short_name : CodeLife
-      language : Chinese
+      short_name : yangqiang
     livefyre :
       site_id : 123
     intensedebate :
