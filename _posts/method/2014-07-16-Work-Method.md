@@ -39,5 +39,6 @@ tags: [Project, Method]
 
 好的工具如同好朋友一样体贴。
 
-Mindmap 类 FreePlane
-茄子闹钟
+Mindmap （心智图）： FreePlane, XMind, FreeMind
+
+番茄闹钟：[Pomodairo](http://code.google.com/p/pomodairo), [focus booster](http://www.focusboosterapp.com)

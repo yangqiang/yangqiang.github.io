@@ -55,11 +55,102 @@ Job ID 为 0 ，这一步还会分析 HDFS 上的文件，将文件划分为 78 
 scheduler.DAGScheduler: Got job 0 (sortByKey at <console>:16) with 78 output partitions (allowLocal=false)
 </pre>
 
+<pre>
 问题：这一步，装入RDD的是否只是 partition 信息，意味着磁盘的数据并没有装入内存？（全部装入内存也是不现实的，4.84 GB > 1.0 GB * 2 ）
-
-Job 1 做的是对每个 partition 做排序，但是并不会真正的做排序，而只是将此操作写入 dependency 然后创建了新的 RDD 对象： result
+答：Job 1 做的是对每个 partition 做排序，但是并不会真正的做排序，而只是将此操作写入 dependency 然后创建了新的 RDD 对象： result
 
 问题：如果执行 persist(MEMORY_ONLY) 应该会产生 OOM，这个操作会触发从 DISK 读入 Memory 的过程？
 答：不会触发 OOM ，执行了这行代码： *val rm = result.persist(org.apache.spark.storage.StorageLevel.MEMORY_ONLY)* ，因为没有 action 操作。
 
 问题： lines 直接做 count 流程如何？
+答：扫描各 partition 的数据，最后 driver 对返回的 ResultTask 中的计数做汇总，历时 4.4 秒。
+</pre>
+
+* 第四步：`result.count` 。这一步会触发 OOM 场景。我当时提交后，此 Job 获得的 ID 为 4 ，此 Job 依赖 Stage 5 ， Stage 5 成功结束，结果类型为 ShuffleMapTask 。接着， Stage 4 开始执行，提交第 32 个 task 之后，出现错误信息。
+
+<pre "prettyprint java linenums">
+14/07/18 10:20:21,035 INFO spark.MapOutputTrackerMasterActor: Asked to send map output locations for shuffle 0 to spark@sg204:42198
+14/07/18 10:20:36,084 INFO scheduler.TaskSetManager: Starting task 4.0:32 as TID 422 on executor 0: sg211 (PROCESS_LOCAL)
+14/07/18 10:20:36,084 INFO scheduler.TaskSetManager: Serialized task 4.0:32 as 4278 bytes in 0 ms
+14/07/18 10:20:36,088 WARN scheduler.TaskSetManager: Lost TID 412 (task 4.0:22)
+14/07/18 10:20:36,091 WARN scheduler.TaskSetManager: Loss was due to java.lang.OutOfMemoryError
+java.lang.OutOfMemoryError: Java heap space
+        at scala.collection.mutable.ResizableArray$class.ensureSize(ResizableArray.scala:99)
+        at scala.collection.mutable.ArrayBuffer.ensureSize(ArrayBuffer.scala:47)
+        at scala.collection.mutable.ArrayBuffer.$plus$eq(ArrayBuffer.scala:83)
+        at scala.collection.mutable.ArrayBuffer.$plus$eq(ArrayBuffer.scala:47)
+        at scala.collection.generic.Growable$$anonfun$$plus$plus$eq$1.apply(Growable.scala:48)
+        at scala.collection.generic.Growable$$anonfun$$plus$plus$eq$1.apply(Growable.scala:48)
+        at scala.collection.Iterator$class.foreach(Iterator.scala:727)
+        at org.apache.spark.InterruptibleIterator.foreach(InterruptibleIterator.scala:28)
+        at scala.collection.generic.Growable$class.$plus$plus$eq(Growable.scala:48)
+        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:103)
+        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:47)
+        at scala.collection.TraversableOnce$class.to(TraversableOnce.scala:273)
+        at org.apache.spark.InterruptibleIterator.to(InterruptibleIterator.scala:28)
+        at scala.collection.TraversableOnce$class.toBuffer(TraversableOnce.scala:265)
+        at org.apache.spark.InterruptibleIterator.toBuffer(InterruptibleIterator.scala:28)
+        at scala.collection.TraversableOnce$class.toArray(TraversableOnce.scala:252)
+        at org.apache.spark.InterruptibleIterator.toArray(InterruptibleIterator.scala:28)
+        at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
+        at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:61)
+        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+        at org.apache.spark.rdd.MapPartitionsRDD.compute(MapPartitionsRDD.scala:35)
+        at org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:262)
+        at org.apache.spark.CacheManager.getOrCompute(CacheManager.scala:77)
+        at org.apache.spark.rdd.RDD.iterator(RDD.scala:227)
+        at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:111)
+        at org.apache.spark.scheduler.Task.run(Task.scala:51)
+        at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:187)
+        at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1110)
+        at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:603)
+        at java.lang.Thread.run(Thread.java:636)
+
+</pre>
+
+从第4行日志信息可以看出，worker 节点 sg211 执行第 22 号任务（TID为412）的时候出现了错误，后来又启动了新线程（TID为423）重新执行 22 号任务。紧接着，10号任务（也是分配给 sg211 执行的，笔者观测到任务是交替分配给各 worker 节点的）也失败了，报如下错：
+
+<pre>
+14/07/18 10:20:42,011 INFO scheduler.TaskSetManager: *Starting task 4.0:22 as TID 423 on executor 0: sg211 (PROCESS_LOCAL)*
+14/07/18 10:20:42,012 INFO scheduler.TaskSetManager: Serialized task 4.0:22 as 4278 bytes in 1 ms
+14/07/18 10:20:42,012 WARN scheduler.TaskSetManager: *Lost TID 400 (task 4.0:10)*
+14/07/18 10:20:42,014 WARN scheduler.TaskSetManager: Loss was due to java.lang.OutOfMemoryError
+java.lang.OutOfMemoryError: GC overhead limit exceeded
+        at java.lang.AbstractStringBuilder.<init>(AbstractStringBuilder.java:62)
+        at java.lang.StringBuilder.<init>(StringBuilder.java:85)
+        at java.io.ObjectInputStream$BlockDataInputStream.readUTFBody(ObjectInputStream.java:3015)
+        at java.io.ObjectInputStream$BlockDataInputStream.readUTF(ObjectInputStream.java:2836)
+        at java.io.ObjectInputStream.readString(ObjectInputStream.java:1616)
+        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1337)
+        at java.io.ObjectInputStream.defaultReadFields(ObjectInputStream.java:1963)
+        at java.io.ObjectInputStream.readSerialData(ObjectInputStream.java:1887)
+        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:1770)
+        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1346)
+        at java.io.ObjectInputStream.readObject(ObjectInputStream.java:368)
+        at org.apache.spark.serializer.JavaDeserializationStream.readObject(JavaSerializer.scala:63)
+        at org.apache.spark.serializer.DeserializationStream$$anon$1.getNext(Serializer.scala:125)
+        at org.apache.spark.util.NextIterator.hasNext(NextIterator.scala:71)
+        at scala.collection.Iterator$$anon$13.hasNext(Iterator.scala:371)
+        at org.apache.spark.util.CompletionIterator.hasNext(CompletionIterator.scala:30)
+        at org.apache.spark.InterruptibleIterator.hasNext(InterruptibleIterator.scala:39)
+        at scala.collection.Iterator$class.foreach(Iterator.scala:727)
+        at org.apache.spark.InterruptibleIterator.foreach(InterruptibleIterator.scala:28)
+        at scala.collection.generic.Growable$class.$plus$plus$eq(Growable.scala:48)
+        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:103)
+        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:47)
+        at scala.collection.TraversableOnce$class.to(TraversableOnce.scala:273)
+        at org.apache.spark.InterruptibleIterator.to(InterruptibleIterator.scala:28)
+        at scala.collection.TraversableOnce$class.toBuffer(TraversableOnce.scala:265)
+        at org.apache.spark.InterruptibleIterator.toBuffer(InterruptibleIterator.scala:28)
+        at scala.collection.TraversableOnce$class.toArray(TraversableOnce.scala:252)
+        at org.apache.spark.InterruptibleIterator.toArray(InterruptibleIterator.scala:28)
+        at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
+        at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:61)
+        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+14/07/18 10:20:46,363 INFO scheduler.TaskSetManager: Starting task 4.0:10 as TID 424 on executor 0: sg211 (PROCESS_LOCAL)
+14/07/18 10:20:46,363 INFO scheduler.TaskSetManager: Serialized task 4.0:10 as 4278 bytes in 0 ms
+</pre>
+
+问题：如何缺乏这几个过程中 Result 的类型，参考 jerrayshao 写的关于 spark scheduler 的博客。
