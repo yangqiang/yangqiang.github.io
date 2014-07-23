@@ -14,19 +14,17 @@ spark 版本：1.0.0
 集群设置：一主二从
 Worker 配置：
 
-<pre>
-spark.executor.memory 1g
-spark.default.parallelism 2
-</pre>
+| spark.executor.memory 1g | //  the maximum amount of CPU cores to request for the application from across the cluster (not from each machine) |
+| spark.default.parallelism 2 | // Default number of tasks to use across the cluster for distributed shuffle operations (groupByKey, reduceByKey, etc) when not set by user. |
 
 sort负载运行方式：
 
-* spark-shell 中输入相关scala代码
+* spark-shell 中输入相关 scala 代码
 * 输入数据规模：4.84GB
 * scala 语句
 
 <pre class="prettyprint java">
-val lines = sc.textFile("/test/OS_ORDER_ITEM.txt", 1)
+val lines = sc.textFile("/test/OS_ORDER_ITEM.txt")
 val data_map = lines.map(line => {(line, 1)})
 val result = data_map.sortByKey().map{line => line._1}
 result.count
@@ -34,15 +32,15 @@ result.count
 
 h2. 运行阶段
 
-* 启动 spark-shell 之后，显示 driver 端的 Memory Store 可支配的内存大小为：294.4 MB ，每个 worker 节点可以用于 block manager 的内存为 588.8 MB 。相关信息： _storage.BlockManagerInfo: Registering block manager sg201:45196 with 294.4 MB RAM_ 和 _Registering block manager sg211:52781 with 588.8 MB RAM_ 这个节点主要工作包括：
+* 启动 spark-shell 之后，显示 driver 端的 Memory Store 可支配的内存大小为：294.4 MB ，相关信息： *storage.BlockManagerInfo: Registering block manager sg201:45196 with 294.4 MB RAM* ；每个 worker 节点可以用于 block manager 的内存为 588.8 MB ，相关信息： *Registering block manager sg211:52781 with 588.8 MB RAM* 这个阶段完成的工作包括：
 ** 启动各项服务，初始化运行环境，如 akka 连接，创建本地数据存放目录。
 ** 创建 SparkContext 对象 sc
 
-* 第一步：从HDFS读数据到RDD，相关代码： _val data_malines = sc.textFile("/test/OS_ORDER_ITEM.txt", 8)_ 。这一步，几乎是瞬间完成的，其实数据并没有从HDFS复制到RDD，毕竟单纯从磁盘load 4.84 GB 数据到内存都需要若干秒钟的时间。重要日志信息： *<notextile> org.apache.spark.rdd.RDD[String] = MappedRDD[1] at textFile at <console>:12 </notextile>*
+* 第一步：从HDFS读数据到RDD，相关代码： _val data_malines = sc.textFile("/test/OS_ORDER_ITEM.txt", 8)_ 。这一步，几乎是瞬间完成的，其实这条操作只是在 driver 上创建了一个 RDD 对象，数据并没有从HDFS复制到RDD，毕竟单纯从磁盘load 4.84 GB 数据到内存都需要若干秒钟的时间。重要日志信息： *<notextile> org.apache.spark.rdd.RDD[String] = MappedRDD[1] at textFile at <console>:12 </notextile>*
 * 第二步：转化RDD，相关代码： _val data_map = lines.map(line => {(line, 1)})_ .。也是瞬间完成的，核心日志： *<notextile> data_map: org.apache.spark.rdd.RDD[(String, Int)] = MappedRDD[2] at map at <console>:14 </notextile>*
 * 第三步：排序，代码： _val result = data_map.sortByKey().map{line => line._1}_ ，这一步会提交 Job ，相关信息如下：
 
-<pre>
+<pre class="prettyprint java linenums">
 14/07/17 16:45:21,936 WARN util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
 14/07/17 16:45:21,936 WARN snappy.LoadSnappy: Snappy native library not loaded
 14/07/17 16:45:21,953 INFO mapred.FileInputFormat: Total input paths to process : 1
@@ -51,7 +49,7 @@ h2. 运行阶段
 
 Job ID 为 0 ，这一步还会分析 HDFS 上的文件，将文件划分为 78 个块，意味着需要 78 个 task 来完成排序任务（这 78 个 task 被放在 0.0 号 TaskSet 中，TaskSet 、 Stage 、 Job 概念相近），最后返回的结果类型为 ResultTask ，相关日志如下：
 
-<pre>
+<pre class="prettyprint java linenums">
 scheduler.DAGScheduler: Got job 0 (sortByKey at <console>:16) with 78 output partitions (allowLocal=false)
 </pre>
 
@@ -60,15 +58,15 @@ scheduler.DAGScheduler: Got job 0 (sortByKey at <console>:16) with 78 output par
 答：Job 1 做的是对每个 partition 做排序，但是并不会真正的做排序，而只是将此操作写入 dependency 然后创建了新的 RDD 对象： result
 
 问题：如果执行 persist(MEMORY_ONLY) 应该会产生 OOM，这个操作会触发从 DISK 读入 Memory 的过程？
-答：不会触发 OOM ，执行了这行代码： *val rm = result.persist(org.apache.spark.storage.StorageLevel.MEMORY_ONLY)* ，因为没有 action 操作。
+答：不会触发 OOM ，执行了这行代码： val rm = result.persist(org.apache.spark.storage.StorageLevel.MEMORY_ONLY) ，因为没有 action 操作。
 
 问题： lines 直接做 count 流程如何？
 答：扫描各 partition 的数据，最后 driver 对返回的 ResultTask 中的计数做汇总，历时 4.4 秒。
 </pre>
 
-* 第四步：`result.count` 。这一步会触发 OOM 场景。我当时提交后，此 Job 获得的 ID 为 4 ，此 Job 依赖 Stage 5 ， Stage 5 成功结束，结果类型为 ShuffleMapTask 。接着， Stage 4 开始执行，提交第 32 个 task 之后，出现错误信息。
+* 第四步： *result.count* 。这一步会触发 OOM 场景。我当时提交后，此 Job 获得的 ID 为 4 ，此 Job 依赖 Stage 5 （这个 Stage 做的是什么操作， sort 吗？）， Stage 5 在 70 秒之后成功结束，结果类型为 ShuffleMapTask （这种类型的 task 会将数据写入 buckets ）。接着， Stage 4 （这个 stage 又是做什么操作的？）开始执行，提交第 32 个 task 之后，出现错误信息。
 
-<pre "prettyprint java linenums">
+<pre class="prettyprint java linenums">
 14/07/18 10:20:21,035 INFO spark.MapOutputTrackerMasterActor: Asked to send map output locations for shuffle 0 to spark@sg204:42198
 14/07/18 10:20:36,084 INFO scheduler.TaskSetManager: Starting task 4.0:32 as TID 422 on executor 0: sg211 (PROCESS_LOCAL)
 14/07/18 10:20:36,084 INFO scheduler.TaskSetManager: Serialized task 4.0:32 as 4278 bytes in 0 ms
@@ -76,42 +74,21 @@ scheduler.DAGScheduler: Got job 0 (sortByKey at <console>:16) with 78 output par
 14/07/18 10:20:36,091 WARN scheduler.TaskSetManager: Loss was due to java.lang.OutOfMemoryError
 java.lang.OutOfMemoryError: Java heap space
         at scala.collection.mutable.ResizableArray$class.ensureSize(ResizableArray.scala:99)
-        at scala.collection.mutable.ArrayBuffer.ensureSize(ArrayBuffer.scala:47)
-        at scala.collection.mutable.ArrayBuffer.$plus$eq(ArrayBuffer.scala:83)
-        at scala.collection.mutable.ArrayBuffer.$plus$eq(ArrayBuffer.scala:47)
-        at scala.collection.generic.Growable$$anonfun$$plus$plus$eq$1.apply(Growable.scala:48)
-        at scala.collection.generic.Growable$$anonfun$$plus$plus$eq$1.apply(Growable.scala:48)
-        at scala.collection.Iterator$class.foreach(Iterator.scala:727)
+        ...
         at org.apache.spark.InterruptibleIterator.foreach(InterruptibleIterator.scala:28)
-        at scala.collection.generic.Growable$class.$plus$plus$eq(Growable.scala:48)
-        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:103)
-        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:47)
-        at scala.collection.TraversableOnce$class.to(TraversableOnce.scala:273)
-        at org.apache.spark.InterruptibleIterator.to(InterruptibleIterator.scala:28)
-        at scala.collection.TraversableOnce$class.toBuffer(TraversableOnce.scala:265)
-        at org.apache.spark.InterruptibleIterator.toBuffer(InterruptibleIterator.scala:28)
-        at scala.collection.TraversableOnce$class.toArray(TraversableOnce.scala:252)
+        ...
         at org.apache.spark.InterruptibleIterator.toArray(InterruptibleIterator.scala:28)
         at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
-        at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:61)
-        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
-        at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
-        at org.apache.spark.rdd.MapPartitionsRDD.compute(MapPartitionsRDD.scala:35)
-        at org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:262)
-        at org.apache.spark.CacheManager.getOrCompute(CacheManager.scala:77)
-        at org.apache.spark.rdd.RDD.iterator(RDD.scala:227)
-        at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:111)
+        ...
         at org.apache.spark.scheduler.Task.run(Task.scala:51)
-        at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:187)
-        at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1110)
-        at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:603)
+        ...
         at java.lang.Thread.run(Thread.java:636)
 
 </pre>
 
 从第4行日志信息可以看出，worker 节点 sg211 执行第 22 号任务（TID为412）的时候出现了错误，后来又启动了新线程（TID为423）重新执行 22 号任务。紧接着，10号任务（也是分配给 sg211 执行的，笔者观测到任务是交替分配给各 worker 节点的）也失败了，报如下错：
 
-<pre>
+<pre class="prettyprint java linenums">
 14/07/18 10:20:42,011 INFO scheduler.TaskSetManager: *Starting task 4.0:22 as TID 423 on executor 0: sg211 (PROCESS_LOCAL)*
 14/07/18 10:20:42,012 INFO scheduler.TaskSetManager: Serialized task 4.0:22 as 4278 bytes in 1 ms
 14/07/18 10:20:42,012 WARN scheduler.TaskSetManager: *Lost TID 400 (task 4.0:10)*
@@ -120,31 +97,11 @@ java.lang.OutOfMemoryError: GC overhead limit exceeded
         at java.lang.AbstractStringBuilder.<init>(AbstractStringBuilder.java:62)
         at java.lang.StringBuilder.<init>(StringBuilder.java:85)
         at java.io.ObjectInputStream$BlockDataInputStream.readUTFBody(ObjectInputStream.java:3015)
-        at java.io.ObjectInputStream$BlockDataInputStream.readUTF(ObjectInputStream.java:2836)
-        at java.io.ObjectInputStream.readString(ObjectInputStream.java:1616)
-        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1337)
-        at java.io.ObjectInputStream.defaultReadFields(ObjectInputStream.java:1963)
-        at java.io.ObjectInputStream.readSerialData(ObjectInputStream.java:1887)
-        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:1770)
-        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1346)
-        at java.io.ObjectInputStream.readObject(ObjectInputStream.java:368)
+        ...
         at org.apache.spark.serializer.JavaDeserializationStream.readObject(JavaSerializer.scala:63)
-        at org.apache.spark.serializer.DeserializationStream$$anon$1.getNext(Serializer.scala:125)
-        at org.apache.spark.util.NextIterator.hasNext(NextIterator.scala:71)
-        at scala.collection.Iterator$$anon$13.hasNext(Iterator.scala:371)
-        at org.apache.spark.util.CompletionIterator.hasNext(CompletionIterator.scala:30)
-        at org.apache.spark.InterruptibleIterator.hasNext(InterruptibleIterator.scala:39)
-        at scala.collection.Iterator$class.foreach(Iterator.scala:727)
+        ...
         at org.apache.spark.InterruptibleIterator.foreach(InterruptibleIterator.scala:28)
-        at scala.collection.generic.Growable$class.$plus$plus$eq(Growable.scala:48)
-        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:103)
-        at scala.collection.mutable.ArrayBuffer.$plus$plus$eq(ArrayBuffer.scala:47)
-        at scala.collection.TraversableOnce$class.to(TraversableOnce.scala:273)
-        at org.apache.spark.InterruptibleIterator.to(InterruptibleIterator.scala:28)
-        at scala.collection.TraversableOnce$class.toBuffer(TraversableOnce.scala:265)
-        at org.apache.spark.InterruptibleIterator.toBuffer(InterruptibleIterator.scala:28)
-        at scala.collection.TraversableOnce$class.toArray(TraversableOnce.scala:252)
-        at org.apache.spark.InterruptibleIterator.toArray(InterruptibleIterator.scala:28)
+        ...
         at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
         at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:61)
         at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
@@ -153,4 +110,44 @@ java.lang.OutOfMemoryError: GC overhead limit exceeded
 14/07/18 10:20:46,363 INFO scheduler.TaskSetManager: Serialized task 4.0:10 as 4278 bytes in 0 ms
 </pre>
 
-问题：如何缺乏这几个过程中 Result 的类型，参考 jerrayshao 写的关于 spark scheduler 的博客。
+h3. 思考
+
+# 如何确认这几个过程中 Result 的类型，参考 jerrayshao 写的关于 spark scheduler 的博客。
+# 为什么将 worker 节点最大使用的核数降低到 2 之后 OOM 问题会消失，核数设置为多大是 OOM 出现的临界点？（多核模式会加快内存的消耗速度，测试总并行度设置为9的时候仍会出现 OOM 错误）
+# RDD.compute() 的原理？（生成 RDD 数据，比如 HadoopRDD.compute() 实现了从 HDFS 读取数据）
+# 会不会出现这种情况：减少核数的方案与改变内存管理策略的方案最后性能相仿？
+# Hadoop 默认 block 大小为多大？（ 64 MB ， 4.84 * 1024 / 64 = 78 ，所以被划分为 78 个任务）
+# 能否通过限制 Partition 数来控制 task 数？当 Partition 数小于 Core 总数时，是否会被 Core 总数替代？（当 Partition 数小于 Block 数时，会被 Block 数替换）
+# 将 RDD 设置为 DISK_ONLY 的存储模式，能否消除 OOM 问题？执行以下代码依然会有 OOM 问题。
+
+<pre class="prettyprint scala">
+val lines = sc.textFile("/test/OS_ORDER_ITEM.txt").persist(org.apache.spark.storage.StorageLevel.DISK_ONLY)
+lines.map(line => {(line, 1)}).sortByKey().count
+</pre>
+
+#_ RDD 的 Iterator 与 BlockManager 之间是如何通信的？
+RDD.iterator():
+
+<pre class="prettyprint scala">
+  final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
+    if (storageLevel != StorageLevel.NONE) {
+      SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
+    } else {
+      computeOrReadCheckpoint(split, context)
+    }
+  }
+</pre>
+
+p(((. 可看出优先从 cacheManager 中取数据，这个 cacheManager 便是与 blockManager 打交道来存取数据的。当 StorageLevel 为 NONE 时，调用 RDD.computeOrReadCheckpoint 来获得 RDD 各 partition 数据。
+
+#_ scala.collection.mutable.ResizableArray$class.ensureSize(ResizableArray.scala:99) 这里的代码做的什么操作，是否只会被 MemoryStore 调用？（日志里的这行错误并非cacheManager导致）
+# Shuffle Reduce 与 Map 是同时启动，还是 Map 全部执行完才启动 Reduce ？
+
+h2. 初步结论
+
+对于 sortByKey 操作，其内存消耗量大概是： mem_needed = cores_assigned * partition_size
+* cores_assigned 表示 worker 节点计算所使用的核数；
+* partition_size 表示每个 partition 数据大小；
+
+OOM 的原因就是 mem_needed 大于剩余内存量，因此可以推测 shuffle 类操作的过程也是相似， fetch 到数据，但是在将本地数据和 fetch 到的数据做 merge 的时候，所使用的内存超过了剩余内存，因此也会失败。
+

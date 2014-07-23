@@ -10,11 +10,12 @@ tags: [Project, Method]
 
 工作最好是目标驱动，否则会导致效率低下。
 
+
 **方法**
 
 迭代
-
 备忘
+
 
 **问题**
 
@@ -31,14 +32,17 @@ tags: [Project, Method]
 
 这里面的第1步，便属于一个设计的问题。
 
+
 **沟通**
 
 当陷入困境时使用。
+
 
 **工具**
 
 好的工具如同好朋友一样体贴。
 
+技术问答网站：Stackoverflow
 Mindmap （心智图）： FreePlane, XMind, FreeMind
-
+笔记管理：有道云笔记、印象笔记
 番茄闹钟：[Pomodairo](http://code.google.com/p/pomodairo), [focus booster](http://www.focusboosterapp.com)

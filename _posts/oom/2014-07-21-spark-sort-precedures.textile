@@ -1,0 +1,136 @@
+---
+layout: post
+title: "Spark sortByKey 执行步骤"
+description: ""
+category: BigData
+tags: [Spark, Sort]
+---
+{% include JB/setup %}
+
+一个典型的错误日志：
+
+<pre class="prettyprint java linenums">
+java.lang.OutOfMemoryError: Java heap space
+	at scala.collection.mutable.ResizableArray$class.ensureSize(ResizableArray.scala:99)
+	...
+	at org.apache.spark.InterruptibleIterator.to(InterruptibleIterator.scala:28)
+	at scala.collection.TraversableOnce$class.toBuffer(TraversableOnce.scala:265)
+	at org.apache.spark.InterruptibleIterator.toBuffer(InterruptibleIterator.scala:28)
+	at scala.collection.TraversableOnce$class.toArray(TraversableOnce.scala:252)
+	at org.apache.spark.InterruptibleIterator.toArray(InterruptibleIterator.scala:28)
+	at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
+	at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:61)
+	at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+	at org.apache.spark.rdd.RDD$$anonfun$12.apply(RDD.scala:559)
+	at org.apache.spark.rdd.MapPartitionsRDD.compute(MapPartitionsRDD.scala:35)
+	at org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:262)
+	at org.apache.spark.rdd.RDD.iterator(RDD.scala:229)
+	at org.apache.spark.rdd.MappedRDD.compute(MappedRDD.scala:31)
+	at org.apache.spark.rdd.RDD.computeOrReadCheckpoint(RDD.scala:262)
+	at org.apache.spark.rdd.RDD.iterator(RDD.scala:229)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:111)
+	at org.apache.spark.scheduler.Task.run(Task.scala:51)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:187)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1110)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:603)
+</pre>
+
+第 21 行至第 18 行是 worker 处理 driver 发送来的 task 的过程。
+
+* ResultTask.runTask
+
+<pre>
+  override def runTask(context: TaskContext): U = {
+    metrics = Some(context.taskMetrics)
+    try {
+      func(context, rdd.iterator(split, context))
+    } finally {
+      context.executeOnCompleteCallbacks()
+    }
+  }
+</pre>
+
+这里的 func 函数是由 DAGScheduler 把 ActiveJob 对象的对应属性传入 ResultTask 的。
+ActiveJob 在 DAGScheduler.handleJobSubmitted 在被创建，func 的类型为： func: (TaskContext, Iterator[_]) => _,
+<- DAGSchedulerEventProcessActor.receive() // main event loop of the DAG Scheduler
+DAGScheduler.initEventActorReply // val 
+
+RDD.count 第 847 行有：sc.runJob(this, Utils.getIteratorSize _).sum ，这里的 Utils.getIteratorSize 便是一个 func
+这么看来 driver 上的 RDD 才是命令的发出者， sc.runJob 触发了一系列操作。
+
+ResultTask contains TaskContext
+
+SparkSubmit:
+
+# $FWDIR/bin/spark-submit spark-shell "$@" --class org.apache.spark.repl.Main
+# SparkContext
+
+h2. 关键步骤：
+
+* 第 28 行： at org.apache.spark.rdd.RDD.iterator(RDD.scala:229)
+
+* at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
+
+h2. 相关代码
+OrderedRDDFunctions.sortByKey()
+
+<pre class="prettyprint scala linenums:58">
+  def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.size): RDD[P] = {
+    val part = new RangePartitioner(numPartitions, self, ascending)
+    val shuffled = new ShuffledRDD[K, V, P](self, part) // 这一步是会生成新的 RDD
+    shuffled.mapPartitions(iter => {
+      val buf = iter.toArray
+      if (ascending) {
+        buf.sortWith((x, y) => ordering.lt(x._1, y._1)).iterator
+      } else {
+        buf.sortWith((x, y) => ordering.gt(x._1, y._1)).iterator
+      }
+    }, preservesPartitioning = true)
+  }
+</pre>
+
+第 62 行代码将 iter 转换为数组，假设同时有 16 个 task 同时执行，那么将消耗 16 * 64 MB = 1024 MB 内存。
+实际测试过程中发现，当单个节点核数设置为 3 时，即此操作使用 192 MB 内存时，就会引发 OOM 错误。
+
+h2. Shuffle 过程
+
+之前的理解是错误的：
+
+<pre>
+sortByKey() 分为两个步骤：
+
+1. 对每个 partition 做排序
+2. 将所有排好序的 partition 合并，形成一个新的 RDD
+
+第二步必须 action 会触发，其执行细节是怎样的？
+1. 在 driver 还是 worker 上做合并？（ worker ）
+2. 合并排序结果时，数据通信是怎么做的？
+3. 怎么到达 shuffle 阶段？（ ExternalAppendOnlyMap ，在 sg108 的日志文件 /home/jonny/java_pid748.hprof 中并未找到这个实例，也没有 Aggregator ）
+
+PairedRDDFunctions 使用的才是 Aggregator 。
+</pre>
+
+实际流程应该是这样：
+
+# 构造新的 ShuffledRDD ，根据采样顺序将不同范围的数据分发到不同的 partition ，使用的是 RangePartitioner 
+# 每个 partition 内部进行排序即可保证整体有序，不需要做归并排序
+
+RangePartitioner 是如何实现的？相关代码
+
+<pre class="prettyprint scala linenums:92">
+class RangePartitioner[K : Ordering : ClassTag, V](
+    partitions: Int,
+    @transient rdd: RDD[_ <: Product2[K,V]],
+    private val ascending: Boolean = true)
+  extends Partitioner {
+
+  private val ordering = implicitly[Ordering[K]]
+
+  // An array of upper bounds for the first (partitions - 1) partitions
+  private val rangeBounds: Array[K] = {
+    ...
+  }
+
+  ...
+}
+</pre>
