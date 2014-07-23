@@ -1,0 +1,60 @@
+---
+layout: page
+title: "游戏记忆"
+description: ""
+category: Life
+tags: [Game, Memory]
+summary: 曾经玩过的游戏
+---
+{% include JB/setup %}
+
+**掌机**
+
+俄罗斯方块
+打坦克
+from 1997
+
+**红白机（小霸王）**
+
+【摩登原始人（当时买的卡带上写着玛丽17代）】、热血物语、坦克大战、洛克人、炸弹人、猫和老鼠、地道战、沙罗曼蛇、冒险岛、超级玛丽、雪人兄弟（跟妹妹一起玩的游戏）、火箭车、西游记、三目童子、忍者神龟、激龟忍者传、魂斗罗、马戏团、西游记、中国象棋、蝙蝠侠、彩虹岛、快打旋风、赤色要塞、越野机车、花式撞墙、三国志、成龙之龙（玛丽造型）、火之鸟（小镇卖彩电的小伙子玩，看他们玩的）！！！加纳战机、人间兵器（看镇上书店女老板玩过）、一款米老鼠和唐老鸭的游戏（8合1卡带里的Pocket yellow可以卷起旋风）、影子传说、玛利失踪记
+
+超级玛丽14代
+from 2000
+
+
+**街机**
+
+惩罚者
+三国志
+三国战纪
+恐龙快打
+月华剑士
+傲剑狂刀
+
+
+from 1998 to 2006
+
+**单机**
+
+永远的超级玛丽
+三国志曹操传系列
+三国群英传
+CS
+三国无双
+
+from 2006
+
+**网游**
+
+英雄联盟
+
+from 2012
+
+相关网站
+
+"梦幻岛-FC":http://www.emu-zone.org/disland/cwjm/fc/fcindex.htm
+"梦幻岛-中文FC":http://www.emu-zone.org/disland/cwjm/xlyx/fccn.htm
+"梦幻岛":http://www.emu-zone.org/disland/cwjm/cwjm.htm
+"童年的回忆-网络硬盘":http://yjjccwg.ys168.com/
+"nes游戏大全":http://www.962.net/k/NESGame/
+"emu818":http://www.emu618.com/
