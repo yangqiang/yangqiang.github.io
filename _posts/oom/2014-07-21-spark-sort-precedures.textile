@@ -291,11 +291,7 @@ computeOrReadCheckpoint() 方法是数据加载的秘密，该方法最后会调
   }
 </pre>
 
-BlockStoreShuffleFetch 实现了 fetch() 方法
-
-<pre class="prettyprint scala">
-
-</pre>
+BlockStoreShuffleFetch 实现了 fetch() 方法，融合各 worker 上 bucket 中的数据。
 
 最后将 RDD 转化为 MapPartitionsRDD ，其 compute 方法如下：
 

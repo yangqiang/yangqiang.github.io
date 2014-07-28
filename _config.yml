@@ -83,7 +83,7 @@ JB :
   #
   comments :
     provider : disqus
-    provider : false
+    #provider : false
     disqus :
       short_name : yangqiang
     livefyre :
