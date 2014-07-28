@@ -7,7 +7,16 @@ tags: [Spark, Sort]
 ---
 {% include JB/setup %}
 
-一个典型的错误日志：
+h2. 相关代码
+
+<pre class="prettyprint java">
+val lines = sc.textFile("/test/OS_ORDER_ITEM.txt")
+val data_map = lines.map(line => {(line, 1)})
+val result = data_map.sortByKey().map{line => line._1}
+result.count
+</pre>
+
+h2. 线索：一个典型的错误日志
 
 <pre class="prettyprint java linenums">
 java.lang.OutOfMemoryError: Java heap space
@@ -51,28 +60,35 @@ java.lang.OutOfMemoryError: Java heap space
 </pre>
 
 这里的 func 函数是由 DAGScheduler 把 ActiveJob 对象的对应属性传入 ResultTask 的。
-ActiveJob 在 DAGScheduler.handleJobSubmitted 在被创建，func 的类型为： func: (TaskContext, Iterator[_]) => _,
-<- DAGSchedulerEventProcessActor.receive() // main event loop of the DAG Scheduler
-DAGScheduler.initEventActorReply // val 
 
-RDD.count 第 847 行有：sc.runJob(this, Utils.getIteratorSize _).sum ，这里的 Utils.getIteratorSize 便是一个 func
+而 ActiveJob 在 DAGScheduler.handleJobSubmitted 中被创建，func 的类型为： func: (TaskContext, Iterator[_]) => _,
+handleJobSubmitted 方法会被 DAG Scheduler 事件处理主循环调用： DAGSchedulerEventProcessActor.receive()
+
+<pre class="prettyprint">
+case JobSubmitted(jobId, rdd, func, partitions, allowLocal, callSite, listener, properties) =>
+      dagScheduler.handleJobSubmitted(jobId, rdd, func, partitions, allowLocal, callSite,
+        listener, properties)
+</pre>
+
+RDD.count 第 847 行有： *sc.runJob(this, Utils.getIteratorSize _).sum* ，这里的 Utils.getIteratorSize 便是一个 func
 这么看来 driver 上的 RDD 才是命令的发出者， sc.runJob 触发了一系列操作。
 
-ResultTask contains TaskContext
+ResultTask 对象包含了 TaskContext
 
 SparkSubmit:
 
 # $FWDIR/bin/spark-submit spark-shell "$@" --class org.apache.spark.repl.Main
 # SparkContext
 
-h2. 关键步骤：
+h3. 关键步骤：
 
 * 第 28 行： at org.apache.spark.rdd.RDD.iterator(RDD.scala:229)
 
 * at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
 
 h2. 相关代码
-OrderedRDDFunctions.sortByKey()
+
+h3. OrderedRDDFunctions.sortByKey()
 
 <pre class="prettyprint scala linenums:58">
   def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.size): RDD[P] = {
@@ -92,6 +108,202 @@ OrderedRDDFunctions.sortByKey()
 第 62 行代码将 iter 转换为数组，假设同时有 16 个 task 同时执行，那么将消耗 16 * 64 MB = 1024 MB 内存。
 实际测试过程中发现，当单个节点核数设置为 3 时，即此操作使用 192 MB 内存时，就会引发 OOM 错误。
 
+data_map （类型为 MappedRDD ）并没有 sortByKey() 方法，通过 scala 的隐式转换（ implicit conversion ）创建了 OrderedRDDFunctions 对象，然后调用此方法。代码位置： spark.SparkContext
+
+<pre class = "prettyprint scala">
+  implicit def rddToPairRDDFunctions[K, V](rdd: RDD[(K, V)])
+      (implicit kt: ClassTag[K], vt: ClassTag[V], ord: Ordering[K] = null) = {
+    new PairRDDFunctions(rdd)
+  }
+</pre>
+
+但是，为什么执行到这一行代码的时候，会提交 job 触发 worker 节点工作？（ sortByKey() 不属于 action ）
+val result = data_map.sortByKey().map{line => line._1}
+
+重读了 Spark 的论文，确认了 sortByKey 不属于 action 操作。
+"jerryshao 的博客":http://jerryshao.me/architecture/2013/04/21/Spark源码分析之-scheduler模块/ 在“ Job 的生与死”小节提到：
+
+bq. 在对RDD的count()和reduceByKey()操作都会调用SparkContext的runJob()来提交job
+
+在 spark user list 里找到了一个相关问题： "non-lazy execution of sortByKey?":http://apache-spark-user-list.1001560.n3.nabble.com/non-lazy-execution-of-sortByKey-td3835.html
+Spark JIRA 里面也标注出这是一个 Bug:  "sortByKey() launches a cluster job when it shouldn't":https://issues.apache.org/jira/browse/SPARK-1021?jql=text%20~%20%22sortByKey%22
+
+h4. RangePartitioner
+
+这行代码：
+
+<pre>
+val part = new RangePartitioner(numPartitions, self, ascending)
+</pre>
+
+会调用以下代码来创建 rangeBounds 数组类型的变量，数组的每个元素记录了新 RDD 每个 partitoner （前 n-1 个）的上限 key 值：
+
+<pre>
+val rddSample = rdd.sample(false, frac, 1).map(_._1).collect().sorted
+</pre>
+
+这里面有 action 操作。
+
+h4. ShuffledRDD
+
+其 compute() 方法会调用 ShuffleFetcher.fetch() 返回数据。
+
+h4. mapPartitions()
+
+h4. ShuffleMapTask.runTask()
+
+这一步实现了数据分发的逻辑：
+
+<pre class="prettyprint scala">
+  override def runTask(context: TaskContext): MapStatus = {
+    val numOutputSplits = dep.partitioner.numPartitions
+    metrics = Some(context.taskMetrics)
+
+    val blockManager = SparkEnv.get.blockManager
+    val shuffleBlockManager = blockManager.shuffleBlockManager
+    var shuffle: ShuffleWriterGroup = null
+    var success = false
+
+    try {
+      // Obtain all the block writers for shuffle blocks.
+      val ser = Serializer.getSerializer(dep.serializer)
+      shuffle = shuffleBlockManager.forMapTask(dep.shuffleId, partitionId, numOutputSplits, ser)
+
+      // Write the map output to its associated buckets.
+      for (elem <- rdd.iterator(split, context)) { // 以 sort 为例，这一行扫描每行文本
+        val pair = elem.asInstanceOf[Product2[Any, Any]]
+        val bucketId = dep.partitioner.getPartition(pair._1) // 当前行内容所属 partition
+        shuffle.writers(bucketId).write(pair)
+      }
+    ...
+  }
+</pre>
+
+h4. RangePartioner.getPartition
+
+使用二分查找找到 key 所属的 partition 。
+
+<pre class="prettyprint scala">
+  def getPartition(key: Any): Int = {
+    val k = key.asInstanceOf[K]
+    var partition = 0
+    if (rangeBounds.length < 1000) {
+      // If we have less than 100 partitions naive search
+      while (partition < rangeBounds.length && ordering.gt(k, rangeBounds(partition))) {
+        partition += 1
+      }
+    } else {
+      // Determine which binary search method to use only once.
+      partition = binarySearch(rangeBounds, k)
+      // binarySearch either returns the match location or -[insertion point]-1
+      if (partition < 0) {
+        partition = -partition-1
+      }
+      if (partition > rangeBounds.length) {
+        partition = rangeBounds.length
+      }
+    }
+    if (ascending) {
+      partition
+    } else {
+      rangeBounds.length - partition
+    }
+  }
+</pre>
+
+方法功能：
+shuffled.mapPartitions 这一句会调用 new MapPartitionsRDD(this, sc.clean(func), preservesPartitioning)
+*很多转化过程都是通过新建 MapPartitionsRDD 来记录的， Spark 便是这些方法引用来实现 lazy 模式。*
+
+<pre class="prettyprint scala">
+  def mapPartitions[U: ClassTag](
+      f: Iterator[T] => Iterator[U], preservesPartitioning: Boolean = false): RDD[U] = {
+    val func = (context: TaskContext, index: Int, iter: Iterator[T]) => f(iter)
+    new MapPartitionsRDD(this, sc.clean(func), preservesPartitioning)
+  }
+</pre>
+
+sc.clean() 如下
+
+<pre class="prettyprint scala">
+  private[spark] def clean[F <: AnyRef](f: F): F = {
+    ClosureCleaner.clean(f)
+    f
+  }
+</pre>
+
+clean() 对传入的 function 做一些处理，返回的仍然是一个 function 。
+
+h5. 计算的时候是如何根据 RangePartioner 的 rangeBounds 来取数据的？
+
+action 触发了 RDD 内部的计算，意味着所有的负载计算在那时执行，之前所做的都只是用 function 记录各种转化操作。
+
+h3. RDD.count()
+
+<pre class="prettyprint scala">
+  /**
+   * Run a function on a given set of partitions in an RDD and pass the results to the given
+   * handler function. This is the main entry point for all actions in Spark. The allowLocal
+   * flag specifies whether the scheduler can run the computation on the driver rather than
+   * shipping it out to the cluster, for short actions like first().
+   */
+  def runJob[T, U: ClassTag](
+      rdd: RDD[T],
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int],
+      allowLocal: Boolean,
+      resultHandler: (Int, U) => Unit) {
+    if (dagScheduler == null) {
+      throw new SparkException("SparkContext has been shutdown")
+    }
+    val callSite = getCallSite
+    val cleanedFunc = clean(func)
+    logInfo("Starting job: " + callSite)
+    val start = System.nanoTime
+    dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, allowLocal,
+      resultHandler, localProperties.get)
+    logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
+    rdd.doCheckpoint()
+  }
+</pre>
+
+这是分发任务的入口，DAGScheduler 将 Job 按 partition 数目划分为 task 交给 worker 执行。
+
+h3. RDD.iterator
+
+<pre class="prettyprint scala">
+  final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
+    if (storageLevel != StorageLevel.NONE) {
+      SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
+    } else {
+      computeOrReadCheckpoint(split, context)
+    }
+  }
+</pre>
+
+computeOrReadCheckpoint() 方法是数据加载的秘密，该方法最后会调用 compute 方法。 sortByKey() 方法里面先将 RDD 转化为 ShuffledRDD ，其 compute 方法如下：
+
+<pre class="prettyprint scala">
+  override def compute(split: Partition, context: TaskContext): Iterator[P] = {
+    val shuffledId = dependencies.head.asInstanceOf[ShuffleDependency[K, V]].shuffleId
+    val ser = Serializer.getSerializer(serializer)
+    SparkEnv.get.shuffleFetcher.fetch[P](shuffledId, split.index, context, ser)
+  }
+</pre>
+
+BlockStoreShuffleFetch 实现了 fetch() 方法
+
+<pre class="prettyprint scala">
+
+</pre>
+
+最后将 RDD 转化为 MapPartitionsRDD ，其 compute 方法如下：
+
+<pre class="prettyprint scala">
+  override def compute(split: Partition, context: TaskContext) =
+    f(context, split.index, firstParent[T].iterator(split, context))
+</pre>
+
 h2. Shuffle 过程
 
 之前的理解是错误的：
@@ -102,7 +314,7 @@ sortByKey() 分为两个步骤：
 1. 对每个 partition 做排序
 2. 将所有排好序的 partition 合并，形成一个新的 RDD
 
-第二步必须 action 会触发，其执行细节是怎样的？
+第二步必须通过 action 会触发，其执行细节是怎样的？
 1. 在 driver 还是 worker 上做合并？（ worker ）
 2. 合并排序结果时，数据通信是怎么做的？
 3. 怎么到达 shuffle 阶段？（ ExternalAppendOnlyMap ，在 sg108 的日志文件 /home/jonny/java_pid748.hprof 中并未找到这个实例，也没有 Aggregator ）
@@ -114,6 +326,16 @@ PairedRDDFunctions 使用的才是 Aggregator 。
 
 # 构造新的 ShuffledRDD ，根据采样顺序将不同范围的数据分发到不同的 partition ，使用的是 RangePartitioner 
 # 每个 partition 内部进行排序即可保证整体有序，不需要做归并排序
+
+------
+
+# 计算每个 shuffle partition 的上界
+# 每个 worker 分析当前 task 中 RDD iterator 的每个元素，根据元素值决定其所属的 partition
+# 每个 worker 融合其需完成 task 的 shuffle partition 融合其需完成
+
+整个过程正如 jerryshao 写的详解 Spark shuffle 的一篇博客中的一张图
+!http://jerryshao.me/img/2014-01-04-spark-shuffle/spark-shuffle.png!
+
 
 RangePartitioner 是如何实现的？相关代码
 
@@ -134,3 +356,7 @@ class RangePartitioner[K : Ordering : ClassTag, V](
   ...
 }
 </pre>
+
+h2. 思考
+
+RDD 的变迁过程都是在 Driver 上记录的，那么 Worker 上的 RDD 对象是如何创建的呢？（直观猜测是 DAGScheduler 将封装好的 task 发送给 Worker ，Worker 拆开 task 可以看到里面的 RDD 信息，具体细节仍有待研究）

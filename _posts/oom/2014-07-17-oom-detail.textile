@@ -149,5 +149,7 @@ h2. 初步结论
 * cores_assigned 表示 worker 节点计算所使用的核数；
 * partition_size 表示每个 partition 数据大小；
 
+Spark 开发者也注意到这个问题，在 spark jira 中有一则 New Feature ： "Support external sorting for RDD#sortByKey()":https://issues.apache.org/jira/browse/SPARK-983?jql=text%20~%20%22sortByKey%22
+
 OOM 的原因就是 mem_needed 大于剩余内存量，因此可以推测 shuffle 类操作的过程也是相似， fetch 到数据，但是在将本地数据和 fetch 到的数据做 merge 的时候，所使用的内存超过了剩余内存，因此也会失败。
 

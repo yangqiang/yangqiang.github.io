@@ -1,7 +1,9 @@
 ---
 layout: page
-title: 近期文章
+title: 指间流浪 | 近期文章
 ---
+
+
 {% assign count = 0 %}
 {% assign limit = 10 %}
 {% for post in site.posts %}
@@ -13,4 +15,3 @@ title: 近期文章
 {% endif %}
 {% assign count = {{ count | plus:1 }} %}
 {% endfor %}
-
