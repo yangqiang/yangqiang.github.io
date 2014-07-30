@@ -7,6 +7,10 @@ tags: [Spark, Sort]
 ---
 {% include JB/setup %}
 
+h2. 引言
+
+Spark 做排序一般都使用 sortByKey 方法，笔者观测到 Spark 对超出内存大小若干倍的数据做排序时，容易引发 OOM 的错误。本文主要针对一个 sortByKey 的例子，结合 Spark-1.0.0 的源代码对排序过程展开细粒度的分析。
+
 h2. 相关代码
 
 <pre class="prettyprint java">
@@ -48,7 +52,7 @@ java.lang.OutOfMemoryError: Java heap space
 
 * ResultTask.runTask
 
-<pre>
+<pre class="prettyprint scala">
   override def runTask(context: TaskContext): U = {
     metrics = Some(context.taskMetrics)
     try {
@@ -59,7 +63,7 @@ java.lang.OutOfMemoryError: Java heap space
   }
 </pre>
 
-这里的 func 函数是由 DAGScheduler 把 ActiveJob 对象的对应属性传入 ResultTask 的。
+这里的 func 函数是由 DAGScheduler 把 *ActiveJob* 对象的对应属性传入 ResultTask 的。这个方法只会在 Worker 节点上被调用，用于完成对 RDD 的操作。
 
 而 ActiveJob 在 DAGScheduler.handleJobSubmitted 中被创建，func 的类型为： func: (TaskContext, Iterator[_]) => _,
 handleJobSubmitted 方法会被 DAG Scheduler 事件处理主循环调用： DAGSchedulerEventProcessActor.receive()
@@ -75,26 +79,22 @@ RDD.count 第 847 行有： *sc.runJob(this, Utils.getIteratorSize _).sum* ，�
 
 ResultTask 对象包含了 TaskContext
 
-SparkSubmit:
-
-# $FWDIR/bin/spark-submit spark-shell "$@" --class org.apache.spark.repl.Main
-# SparkContext
-
-h3. 关键步骤：
+h3. 关键步骤
 
 * 第 28 行： at org.apache.spark.rdd.RDD.iterator(RDD.scala:229)
+* at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62) // 匿名函数
 
-* at org.apache.spark.rdd.OrderedRDDFunctions$$anonfun$sortByKey$1.apply(OrderedRDDFunctions.scala:62)
-
-h2. 相关代码
+h2. 走进源代码
 
 h3. OrderedRDDFunctions.sortByKey()
+
+这行代码是在 Driver 节点上执行的，第 59 行代码会触发提交 Job ，过程中会对 RDD 做采样，定出 partition 的上界。（后面会有更详细的分析）
 
 <pre class="prettyprint scala linenums:58">
   def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.size): RDD[P] = {
     val part = new RangePartitioner(numPartitions, self, ascending)
     val shuffled = new ShuffledRDD[K, V, P](self, part) // 这一步是会生成新的 RDD
-    shuffled.mapPartitions(iter => {
+    shuffled.mapPartitions(iter => {	// 对每个 partition 内的数据做排序，返回排序后的 RDD ， Driver 端执行
       val buf = iter.toArray
       if (ascending) {
         buf.sortWith((x, y) => ordering.lt(x._1, y._1)).iterator
@@ -105,8 +105,9 @@ h3. OrderedRDDFunctions.sortByKey()
   }
 </pre>
 
-第 62 行代码将 iter 转换为数组，假设同时有 16 个 task 同时执行，那么将消耗 16 * 64 MB = 1024 MB 内存。
+第 62 行代码将 iter 转换为数组，假设同时有 16 个 task 执行，那么将消耗 16 * 64 MB = 1024 MB 内存。
 实际测试过程中发现，当单个节点核数设置为 3 时，即此操作使用 192 MB 内存时，就会引发 OOM 错误。
+1GB Heap 有 588MB 被分配给 BlockManager ，还有其它的对象占用了 Heap ，导致排序操作执行时 Heap 空间不够用。
 
 data_map （类型为 MappedRDD ）并没有 sortByKey() 方法，通过 scala 的隐式转换（ implicit conversion ）创建了 OrderedRDDFunctions 对象，然后调用此方法。代码位置： spark.SparkContext
 
@@ -121,12 +122,13 @@ data_map （类型为 MappedRDD ）并没有 sortByKey() 方法，通过 scala �
 val result = data_map.sortByKey().map{line => line._1}
 
 重读了 Spark 的论文，确认了 sortByKey 不属于 action 操作。
-"jerryshao 的博客":http://jerryshao.me/architecture/2013/04/21/Spark源码分析之-scheduler模块/ 在“ Job 的生与死”小节提到：
+"jerryshao 的博客":http://jerryshao.me/architecture/2013/04/21/Spark源码分析之-scheduler模块/ 在“ Job 的生与死”小节也提到类似问题，不过未加解释，实际上，reduceByKey 操作并不会触发 Job。
 
 bq. 在对RDD的count()和reduceByKey()操作都会调用SparkContext的runJob()来提交job
 
-在 spark user list 里找到了一个相关问题： "non-lazy execution of sortByKey?":http://apache-spark-user-list.1001560.n3.nabble.com/non-lazy-execution-of-sortByKey-td3835.html
+后来，在 spark user list 里找到了一个相关问题： "non-lazy execution of sortByKey?":http://apache-spark-user-list.1001560.n3.nabble.com/non-lazy-execution-of-sortByKey-td3835.html
 Spark JIRA 里面也标注出这是一个 Bug:  "sortByKey() launches a cluster job when it shouldn't":https://issues.apache.org/jira/browse/SPARK-1021?jql=text%20~%20%22sortByKey%22
+提交 Job 的原因是，创建 RangePartitioner 的时候会调用 rdd.sample 方法计算 Partition 上界，而 rdd.sample 方法是会触发 Job 提交的，详见下面对 RangePartitioner 源代码的分析。
 
 h4. RangePartitioner
 
@@ -136,19 +138,17 @@ h4. RangePartitioner
 val part = new RangePartitioner(numPartitions, self, ascending)
 </pre>
 
-会调用以下代码来创建 rangeBounds 数组类型的变量，数组的每个元素记录了新 RDD 每个 partitoner （前 n-1 个）的上限 key 值：
+会调用以下代码来创建 rangeBounds 数组类型的变量，该数组的每个元素记录了新 RDD 每个 partitoner （前 n-1 个）的上限 key 值：
 
 <pre>
 val rddSample = rdd.sample(false, frac, 1).map(_._1).collect().sorted
 </pre>
 
-这里面有 action 操作。
+这里面有 action 操作：rdd.sample。
 
 h4. ShuffledRDD
 
 其 compute() 方法会调用 ShuffleFetcher.fetch() 返回数据。
-
-h4. mapPartitions()
 
 h4. ShuffleMapTask.runTask()
 
@@ -179,7 +179,9 @@ h4. ShuffleMapTask.runTask()
   }
 </pre>
 
-h4. RangePartioner.getPartition
+*val bucketId = dep.partitioner.getPartition(pair._1)* 这行代码根据 RDD 的元素值计算其所属 Partition。
+
+h4. RangePartitioner.getPartition
 
 使用二分查找找到 key 所属的 partition 。
 
@@ -211,9 +213,11 @@ h4. RangePartioner.getPartition
   }
 </pre>
 
-方法功能：
+h4. mapPartitions()
+
+方法功能：对每个 Partition 根据传入的方法做 map 操作。
 shuffled.mapPartitions 这一句会调用 new MapPartitionsRDD(this, sc.clean(func), preservesPartitioning)
-*很多转化过程都是通过新建 MapPartitionsRDD 来记录的， Spark 便是这些方法引用来实现 lazy 模式。*
+*很多转化过程都是通过新建 MapPartitionsRDD 来记录的， Spark 便是通过这些方法引用来实现 lazy 模式。*
 
 <pre class="prettyprint scala">
   def mapPartitions[U: ClassTag](
@@ -223,22 +227,31 @@ shuffled.mapPartitions 这一句会调用 new MapPartitionsRDD(this, sc.clean(fu
   }
 </pre>
 
-sc.clean() 如下
+h5. 计算的时候是如何根据 RangePartitioner 的 rangeBounds 来取数据的？
 
-<pre class="prettyprint scala">
-  private[spark] def clean[F <: AnyRef](f: F): F = {
-    ClosureCleaner.clean(f)
-    f
+RangePartitioner 实现的相关代码：
+
+<pre class="prettyprint scala linenums:92">
+class RangePartitioner[K : Ordering : ClassTag, V](
+    partitions: Int,
+    @transient rdd: RDD[_ <: Product2[K,V]],
+    private val ascending: Boolean = true)
+  extends Partitioner {
+
+  private val ordering = implicitly[Ordering[K]]
+
+  // An array of upper bounds for the first (partitions - 1) partitions
+  private val rangeBounds: Array[K] = {
+    ...
   }
+
+  ...
+}
 </pre>
 
-clean() 对传入的 function 做一些处理，返回的仍然是一个 function 。
-
-h5. 计算的时候是如何根据 RangePartioner 的 rangeBounds 来取数据的？
+h3. RDD.count()
 
 action 触发了 RDD 内部的计算，意味着所有的负载计算在那时执行，之前所做的都只是用 function 记录各种转化操作。
-
-h3. RDD.count()
 
 <pre class="prettyprint scala">
   /**
@@ -268,6 +281,7 @@ h3. RDD.count()
 </pre>
 
 这是分发任务的入口，DAGScheduler 将 Job 按 partition 数目划分为 task 交给 worker 执行。
+worker 拆开 task 执行的时候会调用 RDD.iterator 来获取 RDD 的数据。（如果没有获得，就会去计算以生成数据：getOrCompute）
 
 h3. RDD.iterator
 
@@ -291,7 +305,59 @@ computeOrReadCheckpoint() 方法是数据加载的秘密，该方法最后会调
   }
 </pre>
 
-BlockStoreShuffleFetch 实现了 fetch() 方法，融合各 worker 上 bucket 中的数据。
+BlockStoreShuffleFetch 实现了 ShuffleFetcher 接口的 fetch() 方法，融合各 worker 上 bucket 中的数据。
+
+<pre class="prettyprint scala">
+  override def fetch[T](
+      shuffleId: Int,
+      reduceId: Int,
+      context: TaskContext,
+      serializer: Serializer)
+    : Iterator[T] =
+  {
+
+    logDebug("Fetching outputs for shuffle %d, reduce %d".format(shuffleId, reduceId))
+    val blockManager = SparkEnv.get.blockManager
+
+    val startTime = System.currentTimeMillis
+    val statuses = SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleId, reduceId)
+    logDebug("Fetching map output location for shuffle %d, reduce %d took %d ms".format(
+      shuffleId, reduceId, System.currentTimeMillis - startTime))
+
+    val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(Int, Long)]]
+    for (((address, size), index) <- statuses.zipWithIndex) {
+      splitsByAddress.getOrElseUpdate(address, ArrayBuffer()) += ((index, size))
+    }
+
+    val blocksByAddress: Seq[(BlockManagerId, Seq[(BlockId, Long)])] = splitsByAddress.toSeq.map {
+      case (address, splits) =>
+        (address, splits.map(s => (ShuffleBlockId(shuffleId, s._1, reduceId), s._2)))
+    }
+
+    def unpackBlock(blockPair: (BlockId, Option[Iterator[Any]])) : Iterator[T] = {
+      val blockId = blockPair._1
+      val blockOption = blockPair._2
+      blockOption match {
+        case Some(block) => {
+          block.asInstanceOf[Iterator[T]]
+        }
+        case None => {
+          blockId match {
+            case ShuffleBlockId(shufId, mapId, _) =>
+              val address = statuses(mapId.toInt)._1
+              throw new FetchFailedException(address, shufId.toInt, mapId.toInt, reduceId, null)
+            case _ =>
+              throw new SparkException(
+                "Failed to get block " + blockId + ", which is not a shuffle block")
+          }
+        }
+      }
+    }
+
+    val blockFetcherItr = blockManager.getMultiple(blocksByAddress, serializer)
+	...
+  }
+</pre>
 
 最后将 RDD 转化为 MapPartitionsRDD ，其 compute 方法如下：
 
@@ -300,7 +366,7 @@ BlockStoreShuffleFetch 实现了 fetch() 方法，融合各 worker 上 bucket �
     f(context, split.index, firstParent[T].iterator(split, context))
 </pre>
 
-h2. Shuffle 过程
+h2. Shuffle 过程分析
 
 之前的理解是错误的：
 
@@ -309,7 +375,11 @@ sortByKey() 分为两个步骤：
 
 1. 对每个 partition 做排序
 2. 将所有排好序的 partition 合并，形成一个新的 RDD
+</pre>
 
+当时未解决的问题：
+
+<pre>
 第二步必须通过 action 会触发，其执行细节是怎样的？
 1. 在 driver 还是 worker 上做合并？（ worker ）
 2. 合并排序结果时，数据通信是怎么做的？
@@ -329,30 +399,22 @@ PairedRDDFunctions 使用的才是 Aggregator 。
 # 每个 worker 分析当前 task 中 RDD iterator 的每个元素，根据元素值决定其所属的 partition
 # 每个 worker 融合其需完成 task 的 shuffle partition 融合其需完成
 
-整个过程正如 jerryshao 写的详解 Spark shuffle 的一篇博客中的一张图
-!http://jerryshao.me/img/2014-01-04-spark-shuffle/spark-shuffle.png!
+整个过程正如 jerryshao 的 "《详细探究Spark的shuffle实现》":http://jerryshao.me/architecture/2014/01/04/spark-shuffle-detail-investigation 博客中的一张图所示：
+!/pics/spark-shuffle.png!
 
+以 sortByKey 为例， shffule 过程如下图所示：
+!/pics/a-spark-shuffle-example-sort.png!
+图中红色的数字表示每个 partition 的上界。
 
-RangePartitioner 是如何实现的？相关代码
-
-<pre class="prettyprint scala linenums:92">
-class RangePartitioner[K : Ordering : ClassTag, V](
-    partitions: Int,
-    @transient rdd: RDD[_ <: Product2[K,V]],
-    private val ascending: Boolean = true)
-  extends Partitioner {
-
-  private val ordering = implicitly[Ordering[K]]
-
-  // An array of upper bounds for the first (partitions - 1) partitions
-  private val rangeBounds: Array[K] = {
-    ...
-  }
-
-  ...
-}
-</pre>
 
 h2. 思考
 
 RDD 的变迁过程都是在 Driver 上记录的，那么 Worker 上的 RDD 对象是如何创建的呢？（直观猜测是 DAGScheduler 将封装好的 task 发送给 Worker ，Worker 拆开 task 可以看到里面的 RDD 信息，具体细节仍有待研究）
+基于 scala 中 akka.actor 技术，天然支持分布式编程。
+
+# 集群启动的时候各 worker 节点会初始化 SparkContext 对象，好比仓库主管给每个手下一把分库的钥匙。
+# 收到 task 之后， SparkContext 对象根据任务去创建 RDD 并进行计算。这一块可以理解为：主管将任务切分为 1 2 3 三块，分别分配给三个手下（ worker ）去执行，手下执行任务的时候会根据任务编号去仓库取出货物进行处理。一个好的主管，会根据手下离仓库的距离来分配任务，使每个手下能就近取货进行工作。
+# 主管以短信的方式发送任务，比如“拆卸”、“烘干”、“包装”，三个手下按步骤一一执行任务。
+# 有些任务需要协同完成，比如主管想知道一批货里面最重的货物有多重，这就要求各手下发短信协调完成。对于 shuffle 类计算，则需要为分仓库之间建立传送带，保证每两个仓库之间都能相互传送货物。
+
+更多细节可参考 CSDN 博客： "Spark技术内幕：Client，Master和Worker 通信源码解析":http://blog.csdn.net/anzhsoft/article/details/30802603

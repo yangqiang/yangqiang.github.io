@@ -47,3 +47,8 @@ tags: [Project, Method]
 * 番茄闹钟：[Pomodairo](http://code.google.com/p/pomodairo), [focus booster](http://www.focusboosterapp.com)
 * 电子书下载：皮皮书屋、China-pub
 * 专业论坛：以 spark 为例，一些通过 google 无法搜索到的问题可以使用 spark 官方论坛查找资料或发布问题。
+* 流程图、框图：Dia, XMind
+* 技术博客
+  - [ChinaUnix](http://blog.chinaunix.net/)
+  - [酷壳](http://coolshell.cn/)
+  - [阮一峰博客](http://www.ruanyifeng.com/blog/)

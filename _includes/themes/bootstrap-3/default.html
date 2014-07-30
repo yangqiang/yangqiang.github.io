@@ -12,7 +12,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- Bootstrap styles -->
-    <link href="/pygments.css" rel="stylesheet">
+    
     <link href="{{ ASSET_PATH }}/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <!-- Optional theme -->
     <link href="{{ ASSET_PATH }}/bootstrap/css/bootstrap-theme.min.css" rel="stylesheet">
@@ -41,11 +41,12 @@
     <link href="{{ BASE_PATH }}{{ site.JB.atom_path }}" type="application/atom+xml" rel="alternate" title="Sitewide ATOM Feed">
     <link href="{{ BASE_PATH }}{{ site.JB.rss_path }}" type="application/rss+xml" rel="alternate" title="Sitewide RSS Feed">
 
+	<link href="/assets/jqPlanize/planize.css" rel="stylesheet">
   </head>
 
   <body>
     <div id="wrap">
-      <nav class="navbar navbar-default" role="navigation">
+      <nav class="navbar navbar-default navbar-fixed-top" role="navigation">
         <!-- Brand and toggle get grouped for better mobile display -->
         <div class="navbar-header">
           <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#jb-navbar-collapse">
@@ -73,7 +74,7 @@
         </div><!-- /.navbar-collapse -->
       </nav>
 
-      <div class="container">
+      <div class="container" style="margin-top:40px">
         {{ content }}
       </div>
 

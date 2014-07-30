@@ -32,7 +32,9 @@ result.count
 
 h2. 运行阶段
 
-* 启动 spark-shell 之后，显示 driver 端的 Memory Store 可支配的内存大小为：294.4 MB ，相关信息： *storage.BlockManagerInfo: Registering block manager sg201:45196 with 294.4 MB RAM* ；每个 worker 节点可以用于 block manager 的内存为 588.8 MB ，相关信息： *Registering block manager sg211:52781 with 588.8 MB RAM* 这个阶段完成的工作包括：
+* 启动 spark-shell 之后，显示 driver 端的 Memory Store 可支配的内存大小为：294.4 MB ，相关信息： 
+*storage.BlockManagerInfo: Registering block manager sg201:45196 with 294.4 MB RAM*
+每个 worker 节点可以用于 block manager 的内存为 588.8 MB ，相关信息： *Registering block manager sg211:52781 with 588.8 MB RAM* 这个阶段完成的工作包括：
 ** 启动各项服务，初始化运行环境，如 akka 连接，创建本地数据存放目录。
 ** 创建 SparkContext 对象 sc
 
