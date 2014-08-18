@@ -46,8 +46,8 @@
       number_suffix    : '',
       number_separator : '.',
       toc_elem         : null,
-      toc_none         : 'No heading found for this document',
-      toc_title        : 'Table of contents'
+      toc_none         : 'Just read it.',
+      toc_title        : 'Contents'
     };
     config = jQuery.extend(defaultConfig, config);
   
