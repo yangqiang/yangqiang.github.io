@@ -1,9 +1,10 @@
 ---
 layout: post
-title: "Spark sortByKey 执行步骤"
+title: "Spark 执行步骤详解：以 sortByKey 为例"
 description: ""
 category: BigData
 tags: [Spark, Sort]
+summary: Spark OOM 分析的第二篇，结合 Spark 1.0.0 的代码来分析 Spark 处理任务的流程
 ---
 {% include JB/setup %}
 
@@ -407,14 +408,21 @@ PairedRDDFunctions 使用的才是 Aggregator 。
 图中红色的数字表示每个 partition 的上界。
 
 
-h2. 思考
+h2. 小结
 
-RDD 的变迁过程都是在 Driver 上记录的，那么 Worker 上的 RDD 对象是如何创建的呢？（直观猜测是 DAGScheduler 将封装好的 task 发送给 Worker ，Worker 拆开 task 可以看到里面的 RDD 信息，具体细节仍有待研究）
-基于 scala 中 akka.actor 技术，天然支持分布式编程。
+Spark 任务执行过程小结：
 
-# 集群启动的时候各 worker 节点会初始化 SparkContext 对象，好比仓库主管给每个手下一把分库的钥匙。
-# 收到 task 之后， SparkContext 对象根据任务去创建 RDD 并进行计算。这一块可以理解为：主管将任务切分为 1 2 3 三块，分别分配给三个手下（ worker ）去执行，手下执行任务的时候会根据任务编号去仓库取出货物进行处理。一个好的主管，会根据手下离仓库的距离来分配任务，使每个手下能就近取货进行工作。
-# 主管以短信的方式发送任务，比如“拆卸”、“烘干”、“包装”，三个手下按步骤一一执行任务。
-# 有些任务需要协同完成，比如主管想知道一批货里面最重的货物有多重，这就要求各手下发短信协调完成。对于 shuffle 类计算，则需要为分仓库之间建立传送带，保证每两个仓库之间都能相互传送货物。
+* 集群启动的时候各 worker 节点会初始化 SparkContext 对象
+* 用户提交的 action 操作，如 count, collect 会被 Driver 发送到 Worker 执行。
+* 收到 task 之后， SparkContext 对象根据任务去创建 RDD 并进行计算。
+* Driver 从 Worker 取得数据，做简单处理计算得到最终结果
 
+以仓库管理类比：（1个主管，3个手下，3个仓库）
+
+* 好比仓库主管给每个手下一把分库的钥匙
+* 主管将任务切分为 1 2 3 三块，分别分配给三个手下去执行，一个好的主管，会根据手下离仓库的距离来分配任务，使每个手下能就近取货进行工作，主管以短信的方式发送任务，比如“拆卸”、“烘干”、“包装”，三个手下按步骤一一执行任务。
+* 手下执行任务的时候会根据任务编号从仓库取出货物进行处理。
+* 有些任务需要协同完成，比如主管想把一批货里面货物按生产日期重新排列，这就要求各手下发短信协调完成。这种 shuffle 类的计算，需要为分仓库之间建立传送带，保证每两个仓库之间都能相互传送货物。
+
+RDD 的变迁过程都是在 Driver 上记录的，那么 Worker 上的 RDD 对象是如何创建的呢？（直观猜测是 DAGScheduler 将封装好的 task 发送给 Worker ，Worker 拆开 task 可以看到里面的 RDD 信息，基于 scala 中 akka.actor 技术实现，天然支持分布式编程）
 更多细节可参考 CSDN 博客： "Spark技术内幕：Client，Master和Worker 通信源码解析":http://blog.csdn.net/anzhsoft/article/details/30802603
