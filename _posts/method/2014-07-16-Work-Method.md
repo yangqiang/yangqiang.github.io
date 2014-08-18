@@ -4,8 +4,10 @@ title: "我的日常工作方法盘点"
 description: ""
 category: "Method"
 tags: [Project, Method]
+summary: 一些简单的工作方法，一些常用的效率类软件推荐
 ---
 {% include JB/setup %}
+{:toc}
 ###目标
 
 工作最好是目标驱动，否则会导致效率低下。
@@ -13,7 +15,7 @@ tags: [Project, Method]
 
 ###方法
 
-####迭代（ Angile 即敏捷开发）
+####迭代（ Agile 即敏捷开发）
 不要等所有东西都准备好了才开始做，先做个小板凳，然后在上面雕刻花纹。
 
 ####备忘
@@ -52,3 +54,7 @@ tags: [Project, Method]
   - [ChinaUnix](http://blog.chinaunix.net/)
   - [酷壳](http://coolshell.cn/)
   - [阮一峰博客](http://www.ruanyifeng.com/blog/)
+  - [王垠](http://yinwang.org)
+* 项目管理
+  - Redmine
+  - JIRA
