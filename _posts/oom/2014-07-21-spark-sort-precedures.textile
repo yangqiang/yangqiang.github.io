@@ -3,7 +3,7 @@ layout: post
 title: "Spark 执行步骤详解：以 sortByKey 为例"
 description: ""
 category: BigData
-tags: [Spark, Sort]
+tags: [Spark]
 summary: Spark OOM 分析的第二篇，结合 Spark 1.0.0 的代码来分析 Spark 处理任务的流程
 ---
 {% include JB/setup %}
