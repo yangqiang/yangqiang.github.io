@@ -1,0 +1,139 @@
+---
+layout: post
+title: "Scala 语法常见小问题记录"
+description: ""
+category: Language
+tags: [Scala]
+---
+{% include JB/setup %}
+
+h2. 类型名后面的 *
+
+def apply[A](elems: A*): Iterator[A] = elems.iterator
+
+应该表示元素类型为 A 的复合类型
+
+h2. apply 方法
+
+object 的构造方法，可以不使用 new 关键字创建对象，比如 Array 类型。在 《Scala Cookbook》6.8小结中提到:
+
+<pre>
+To demonstrate the first approach, define a Person  class and Person object in the same
+file. Define an  applymethod in the object that takes the desired parameters. This meth‐
+od is essentially the constructor of your class:
+
+class Person {
+  var name: String = _
+}
+
+object Person {
+  def apply(name: String): Person = {
+    var p = new Person
+    p.name = name
+    p
+  }
+}
+Given this definition, you can create new Personinstances without using the newkey‐
+word, as shown in these examples:
+val dawn = Person("Dawn")
+val a = Array(Person("Dan"), Person("Elijah"))
+The apply  method in a companion object is treated specially by the Scala compiler and
+lets you create new instances of your class without requiring the  newkeyword.
+</pre>
+
+h2. case 关键字的几种用法
+
+case 
+
+h2. 接口中的 self
+
+trait TraversableOnce[+A] extends Any with GenTraversableOnce[A] {
+  self =>
+  
+  def foreach[U](f: A => U): Unit
+  ...
+}
+
+后面的方法中可以直接使用 self。
+
+h2. 类型定义
+
+Class[A]：只接受 A 类型
+Class[+A]：可接受 A 的子类型
+Class[-A]：可接受 A 的父类型
+
+A <: B Upper bound Amust be a subtype of B. See Recipe 19.6.
+A >: B Lower bound Amust be a supertype of B. Not commonly used. See Recipe 19.8.
+A <: Upper >: Lower Lower and upper bounds used together The type Ahas both an upper and lower bound.
+
+A =:= B  // A must be equal to B
+A <:< B  // A must be a subtype of B
+A <%< B  // A must be viewable as B
+
+h2. 隐式转换
+
+什么时候被执行？
+
+h2. private[spark]
+
+private[spark] class RDDCheckpointData[T: ClassTag](@transient rdd: RDD[T])
+  extends Logging with Serializable {
+  ...
+}
+
+这里的 private[spark] 可能是指类 RDDCheckpointData 的可见域。
+
+h2. 匿名内部类
+
+这里的 NextIterator 是一个 Abstract Class，不能直接实例化，必须先实现此类。
+
+val iter = new NextIterator[(K, V)] {
+  ...
+  override def getNext() = {
+  ...
+}
+}
+
+h2. @ 的含义
+
+表示继承
+
+h2. 下划线的几种含义
+
+参考资料：
+
+"stackoverflow - What are all the uses of an underscore in Scala?":http://stackoverflow.com/questions/8000903/what-are-all-the-uses-of-an-underscore-in-scala
+
+其他不理解的代码类型：
+
+class InterruptibleIterator[+T](val context: TaskContext, val delegate: Iterator[T])
+
+h2. "Scala 中 class 与 object 有什么区别？":http://stackoverflow.com/questions/1755345/scala-difference-between-object-and-class
+
+You can think of the "object" keyword creating a Singleton object of a class, that is defined implicitely.
+
+object A extends B with C
+
+This will declare an anonymous class which extends B with the trait C and create a single instance of this class named A.
+
+h2. "implicit 关键字的含义":http://stackoverflow.com/questions/10375633/understanding-implicit-in-scala
+
+There are plenty of pages on the internet that will help you learn about implicits, for example: here.
+
+The difference between your methods is that the one marked implicit will be inserted for you by the compiler when a Double is found but an Int is required. So
+
+<pre>
+implicit def doubleToInt(d: Double) = d.toInt
+val x: Int = 42.0
+</pre>
+
+will work the same as
+
+<pre>
+def doubleToInt(d: Double) = d.toInt
+val x: Int = doubleToInt(42.0)
+</pre>
+
+The conversion here is required because of the type annotation on the left hand side.
+
+In your first snippet from Play, the implicit request refers to an implicit value (here of type Request), which is slightly different from an implicit def. It is taken from the current context.
