@@ -51,6 +51,7 @@ summary: 一些简单的工作方法，一些常用的效率类软件推荐
 * 专业论坛：以 spark 为例，一些通过 google 无法搜索到的问题可以使用 spark 官方论坛查找资料或发布问题。
 * 流程图、框图：Dia, XMind
 * 技术博客
+  - [董西成博客](http://dongxicheng.org/)
   - [ChinaUnix](http://blog.chinaunix.net/)
   - [酷壳](http://coolshell.cn/)
   - [阮一峰博客](http://www.ruanyifeng.com/blog/)
