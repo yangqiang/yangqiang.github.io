@@ -282,7 +282,7 @@ action 触发了 RDD 内部的计算，意味着所有的负载计算在那时�
 </pre>
 
 这是分发任务的入口，DAGScheduler 将 Job 按 partition 数目划分为 task 交给 worker 执行。
-worker 拆开 task 执行的时候会调用 RDD.iterator 来获取 RDD 的数据。（如果没有获得，就会去计算以生成数据：getOrCompute）
+worker 拆开 task 执行的时候（scheduler.ResultTask/ShuffleMapTask.runTask() 方法）会调用 RDD.iterator 来读取 RDD 的数据。（如果没有获得，就会去计算以生成数据：getOrCompute）
 
 h3. RDD.iterator
 
@@ -391,14 +391,10 @@ PairedRDDFunctions 使用的才是 Aggregator 。
 
 实际流程应该是这样：
 
-# 构造新的 ShuffledRDD ，根据采样顺序将不同范围的数据分发到不同的 partition ，使用的是 RangePartitioner 
-# 每个 partition 内部进行排序即可保证整体有序，不需要做归并排序
-
-------
-
-# 计算每个 shuffle partition 的上界
-# 每个 worker 分析当前 task 中 RDD iterator 的每个元素，根据元素值决定其所属的 partition
-# 每个 worker 融合其需完成 task 的 shuffle partition 融合其需完成
+# 对原始 RDD 做 sample（采样），计算每个新的 partition 的上界，即构造出一个 RangePartitioner 对象；
+# 使用 RangePartitioner 构造新的 ShuffledRDD；
+# 计算过程中分为两步：1）Map 阶段，按“桶排序”的方法，对每个 partition 的数据进行处理，根据数据的值分发到不同的 bucket；2）Reduce 阶段，从每个 worker 上的 bucket 文件中取出数据，放入每个 partition；
+# 对每个 partition 内的数据做排序，由于 RangePartitioner 保证 partition 之间整体有序，因此不需要再做归并排序。
 
 整个过程正如 jerryshao 的 "《详细探究Spark的shuffle实现》":http://jerryshao.me/architecture/2014/01/04/spark-shuffle-detail-investigation 博客中的一张图所示：
 !/pics/spark-shuffle.png!
@@ -412,16 +408,16 @@ h2. 小结
 
 Spark 任务执行过程小结：
 
-* 集群启动的时候各 worker 节点会初始化 SparkContext 对象
-* 用户提交的 action 操作，如 count, collect 会被 Driver 发送到 Worker 执行。
-* 收到 task 之后， SparkContext 对象根据任务去创建 RDD 并进行计算。
-* Driver 从 Worker 取得数据，做简单处理计算得到最终结果
+* 集群启动的时候各 worker 节点会初始化 SparkContext 对象；
+* 用户提交的 action 操作，如 count, collect 会被 Driver 发送到 Worker 执行；
+* 收到 task 之后， SparkContext 对象根据任务去创建 RDD 并进行计算；
+* Driver 从 Worker 取得数据，做简单处理计算得到最终结果。
 
 以仓库管理类比：（1个主管，3个手下，3个仓库）
 
-* 好比仓库主管给每个手下一把分库的钥匙
-* 主管将任务切分为 1 2 3 三块，分别分配给三个手下去执行，一个好的主管，会根据手下离仓库的距离来分配任务，使每个手下能就近取货进行工作，主管以短信的方式发送任务，比如“拆卸”、“烘干”、“包装”，三个手下按步骤一一执行任务。
-* 手下执行任务的时候会根据任务编号从仓库取出货物进行处理。
+* 好比仓库主管给每个手下一把分库的钥匙；
+* 主管将任务切分为 1 2 3 三块，分别分配给三个手下去执行，一个好的主管，会根据手下离仓库的距离来分配任务，使每个手下能就近取货进行工作，主管以短信的方式发送任务，比如“拆卸”、“烘干”、“包装”，三个手下按步骤一一执行任务；
+* 手下执行任务的时候会根据任务编号从仓库取出货物进行处理；
 * 有些任务需要协同完成，比如主管想把一批货里面货物按生产日期重新排列，这就要求各手下发短信协调完成。这种 shuffle 类的计算，需要为分仓库之间建立传送带，保证每两个仓库之间都能相互传送货物。
 
 RDD 的变迁过程都是在 Driver 上记录的，那么 Worker 上的 RDD 对象是如何创建的呢？（直观猜测是 DAGScheduler 将封装好的 task 发送给 Worker ，Worker 拆开 task 可以看到里面的 RDD 信息，基于 scala 中 akka.actor 技术实现，天然支持分布式编程）
