@@ -3,7 +3,7 @@ layout: post
 title: "拨开 Spark OOM 迷雾：从 sortByKey 开始观察"
 description: ""
 category: BigData
-tags: [Spark, OOM]
+tags: [Spark]
 summary: 使用sortByKey()方法来构造OOM场景，从spark-shell的日志信息分析OOM出现的阶段及原因
 ---
 {% include JB/setup %}
