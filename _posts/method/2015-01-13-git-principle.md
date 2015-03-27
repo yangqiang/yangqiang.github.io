@@ -51,10 +51,11 @@ master 分支管理员确认代码可用之后，就可以将 335-jack 分支 me
 git checkout master
 git pull
 git checkout 335-jack
-git merge master
+<strike>git merge master</strike>（使用 rebase 更好）
+git rebase master（可以将 master 的改动同步到当前分支）
 </pre>
 
-此时，如果提示有冲突，可在解决冲突之后（为了解决冲突，jack 可能要找 mary 聊聊～）再次 merge 并将分支 push 到远端。
+此时，如果提示有冲突，可在解决冲突之后（为了解决冲突，jack 可能要找 mary 聊聊～）再次执行 rebase 命令，并将分支 push 到远端。
 
 ####保持精简
 
