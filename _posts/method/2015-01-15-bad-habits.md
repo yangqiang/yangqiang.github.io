@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "几种坏的工作习惯"
+title: "工作中的几个坏习惯"
 description: ""
 category: "method"
 tags: []
