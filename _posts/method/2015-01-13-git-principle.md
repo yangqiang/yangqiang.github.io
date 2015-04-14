@@ -10,7 +10,7 @@ summary: 为了减少协同开发带来的麻烦，必须遵守既定的原则�
 {:toc}
 ###原则
 
-一切的规则，都是为了减少协同开发引发的混乱。
+规则，是为了减少混乱。
 
 
 ###一种简单的方法
@@ -68,6 +68,8 @@ git rebase master（可以将 master 的改动同步到当前分支）
 ###参考资料
 
 * [GIT分支管理是一门艺术](http://roclinux.cn/?p=2129)
+* [Understanding the GitHub Flow](https://guides.github.com/introduction/flow/index.html)
+* [What is a good Git workflow?](https://help.github.com/articles/what-is-a-good-git-workflow/)
 * [segmentfault: 请推荐一个适合4-6人小团队的git代码管理模式](http://segmentfault.com/q/1010000000349610)
 * [感谢@朱玮](http://blog.zuuii.com/)
 

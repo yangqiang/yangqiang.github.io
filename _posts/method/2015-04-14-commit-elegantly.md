@@ -1,0 +1,71 @@
+---
+layout: post
+title: "谨慎送礼：git commit"
+description: ""
+category: "Method"
+tags: [git]
+summary: 不能一时图省事使用 `git add *'，而引发后续的 diff 灾难。
+---
+{% include JB/setup %}
+{:toc}
+###git 工作机制
+
+文件一旦交由 git 管理，便被 git 细心呵护，所有的更新（新建、修改、删除）都会被一丝不苟地记录下来。当文件过大、过多时，git 的性能将急剧下降；因此，应该保持被托管对象的精简。
+
+
+###代码提交的风险
+
+写好了代码，心情舒畅，可是一次粗心的提交，可能导致其他队友头疼不已。比如写好了代码，本地编译并测试，产生大量 .o, .a, .so, .lib, .txt, .log 文件。提交者爽快地执行了这些代码：
+
+<pre>
+git add *
+git commit -m 'finish #174'
+git push origin jack-174
+</pre>
+
+然后，代码库文件 size 急剧膨胀！这条`git add *`真是罪魁祸首。
+
+###让代码提交来得优雅一点
+
+为了减少灾祸，大致有以下几种应对之策。
+
+####编写 .gitignore
+
+一般而言，前面提到的 .o, .a, .so, .lib, .txt, .log 文件，可以写入仓库的“黑名单”物品列表中，他们都属于“高危物品”。.gitignore 文件的编写规范可参考其[官方文档](http://git-scm.com/docs/gitignore)。
+
+####make clean
+
+代码提交时，使用 `git status` 命令查看文件更新情况，如果没用合理编写 .gitignore 文件，可能会有一个长长的文件列表。此时，可以执行 `make clean` 类的命令来删除测试产生的大量文件，以避免将这些文件提交。
+
+####少吃多餐
+
+一次工作量较大的代码开发工作，应该拆分成多个子过程进行提交，这样使自己的工作更容易被同事理解，也方便排错。即把这种提交方式：
+
+<pre>
+git add A.c B.c C.c
+git commit -m 'finish #174'
+</pre>
+
+变成
+
+<pre>
+git add A.c
+git commit -m 'finish #174-1'
+git add B.c
+git commit -m 'finish #174-2'
+git add C.c
+git commit -m 'finish #174-3 & #174'
+</pre>
+
+####垃圾清理
+
+从 git 历史中删除已经添加进去的垃圾文件，是一件让人十分头疼的事情，就好像要从记忆里完全抹掉一个人。
+
+<pre>
+git rm A.o B.o C.o
+git commit -m 'delete .o files'
+</pre>
+
+这种方式只能保证今后检出的代码中不再有 A.o B.o C.o 这些文件，**但是 git 的底层数据依然保留着那些文件**。要彻底删除记忆，可参考[这篇文章](http://stackoverflow.com/questions/2100907/how-to-remove-delete-a-large-file-from-commit-history-in-git-repository)。
+
+
