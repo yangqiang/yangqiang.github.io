@@ -10,11 +10,11 @@ extensions: ["fenced_code_blocks", "tables", "highlight", "strikethrough"]
 # Themes are encouraged to use these universal variables 
 # so be sure to set them if your theme uses them.
 #
-title : 指间流浪
+title : 指尖浮光
 tagline: Site Tagline
 author :
   name : Jonny Young
-  email : yangqiangyq at gmail dot com
+  email : yangqiangyq at foxmail dot com
   github : yangqiang
   twitter : username
   feedburner : feedname

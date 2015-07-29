@@ -15,7 +15,7 @@ summary: 不能一时图省事使用 `git add *'，而引发后续的 diff 灾�
 
 ###代码提交的风险
 
-写好了代码，心情舒畅，可是一次粗心的提交，可能导致其他队友头疼不已。比如写好了代码，本地编译并测试，产生大量 .o, .a, .so, .lib, .txt, .log 文件。提交者爽快地执行了这些代码：
+写好了代码，心情舒畅，可是一次粗心的提交，可能导致其他队友头疼不已。比如写好了代码，本地编译并测试，产生大量 .o, .a, .so, .lib, .txt, .log, .out 之类文件。提交者爽快地执行了这些代码：
 
 <pre>
 git add *
@@ -35,7 +35,7 @@ git push origin jack-174
 
 ####make clean
 
-代码提交时，使用 `git status` 命令查看文件更新情况，如果没用合理编写 .gitignore 文件，可能会有一个长长的文件列表。此时，可以执行 `make clean` 类的命令来删除测试产生的大量文件，以避免将这些文件提交。
+代码提交时，使用 `git status` 命令查看文件更新情况，如果没用合理编写 .gitignore 文件（比如，很多可执行文件的名字不以 .out 结尾），可能会有一个长长的文件列表。此时，可以执行 `make clean` 类的命令来删除测试产生的大量文件，以避免将这些文件提交。
 
 ####少吃多餐
 
@@ -57,7 +57,11 @@ git add C.c
 git commit -m 'finish #174-3 & #174'
 </pre>
 
-####垃圾清理
+####转移大文件
+
+如果程序依赖其他的较大的库文件或者测试数据，应该只提供获取这些数据的方法（文档或者脚本程序）。
+
+####清理之难
 
 从 git 历史中删除已经添加进去的垃圾文件，是一件让人十分头疼的事情，就好像要从记忆里完全抹掉一个人。
 
@@ -66,6 +70,6 @@ git rm A.o B.o C.o
 git commit -m 'delete .o files'
 </pre>
 
-这种方式只能保证今后检出的代码中不再有 A.o B.o C.o 这些文件，**但是 git 的底层数据依然保留着那些文件**。要彻底删除记忆，可参考[这篇文章](http://stackoverflow.com/questions/2100907/how-to-remove-delete-a-large-file-from-commit-history-in-git-repository)。
+这种方式只能保证今后检出的代码中不再有 A.o B.o C.o 这些文件，**但是 git 的底层数据依然保留着那些文件**。要彻底删除记忆，可参考[这篇文章](http://stackoverflow.com/questions/2100907/how-to-remove-delete-a-large-file-from-commit-history-in-git-repository)。所以说，与其熟练地灭火，不如提高防火意识。
 
 

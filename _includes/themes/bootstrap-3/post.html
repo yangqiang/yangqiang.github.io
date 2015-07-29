@@ -36,7 +36,7 @@
     {% else %}
       <li class="prev disabled"><a>&larr; Previous</a></li>
     {% endif %}
-      <li><a href="{{ BASE_PATH }}{{ site.JB.archive_path }}">Archive</a></li>
+      <li><a href="{{ BASE_PATH }}{{ site.JB.archive_path }}">尘封</a></li>
     {% if page.next %}
       <li class="next"><a href="{{ BASE_PATH }}{{ page.next.url }}" title="{{ page.next.title }}">Next &raquo;</a></li>
     {% else %}
@@ -47,10 +47,25 @@
     {% include JB/comments %}
   </div>
 </div>
+<style>
+#bm_power_bt {
+  position: fixed;
+  top:40%;
+  right:40%;
+}
+  #bm_power_bt a {
+    color: green;
+  }
+</style>
+<div id="bm_power_bt">
+<a>查看导航</a>
+</div>
+
 <script src="/assets/jquery-2.1.1.min.js"></script>
 <script type="text/javascript" src="/assets/jqPlanize/jquery.planize.js"></script>
 <script type="text/javascript">
   var originalBodyContent;
+  var bm_on = false;
   function restoreBodyContent(include_toc) {
     $('body').html(originalBodyContent);
     if (include_toc) {
@@ -59,7 +74,21 @@
   }
   $(document).ready(function(){
     originalBodyContent = $('body').html();
+    $('#bm_power_bt').on( 'click', function(e){
+      //alert('hi');
+      if (bm_on) {
+        $('#toc').addClass("hide");
+      bm_on=false;
+
+    } else {
+      bm_on=true;
+        $('#toc').removeClass("hide");
+    }
+    });
+
   });
   // generate bookmark
-  //restoreBodyContent(true);$('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
+  restoreBodyContent(true);
+  $('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
+  $('#toc').addClass("hide");
 </script>

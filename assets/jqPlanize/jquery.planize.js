@@ -46,8 +46,8 @@
       number_suffix    : '',
       number_separator : '.',
       toc_elem         : null,
-      toc_none         : 'Just read it.',
-      toc_title        : 'Contents'
+      toc_none         : '',
+      toc_title        : '概要'
     };
     config = jQuery.extend(defaultConfig, config);
   
