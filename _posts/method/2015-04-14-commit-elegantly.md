@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "谨慎送礼：git commit"
+title: "优雅地提交：git commit"
 description: ""
 category: "Method"
 tags: [git]
@@ -10,12 +10,12 @@ summary: 不能一时图省事使用 `git add *'，而引发后续的 diff 灾�
 {:toc}
 ###git 工作机制
 
-文件一旦交由 git 管理，便被 git 细心呵护，所有的更新（新建、修改、删除）都会被一丝不苟地记录下来。当文件过大、过多时，git 的性能将急剧下降；因此，应该保持被托管对象的精简。
+文件交由 git 管理之后，其所有的更新（修改、删除）都会被一丝不苟地记录下来。当文件过大、过多时，git 的性能将急剧下降；因此，应尽量减少被托管文件的数量。
 
 
 ###代码提交的风险
 
-写好了代码，心情舒畅，可是一次粗心的提交，可能导致其他队友头疼不已。比如写好了代码，本地编译并测试，产生大量 .o, .a, .so, .lib, .txt, .log, .out 之类文件。提交者爽快地执行了这些代码：
+一次粗心的代码提交，可能会增加组员工作的麻烦。比如组员A写好了代码，并在本地编译并测试，产生大量 .o, .a, .so, .lib, .txt, .log, .out 之类文件。测试结束后，A 忘了删除这些非代码文件，直接执行这些代码：
 
 <pre>
 git add *
@@ -25,7 +25,7 @@ git push origin jack-174
 
 然后，代码库文件 size 急剧膨胀！这条`git add *`真是罪魁祸首。
 
-###让代码提交来得优雅一点
+###优雅地提交
 
 为了减少灾祸，大致有以下几种应对之策。
 
@@ -56,6 +56,8 @@ git commit -m 'finish #174-2'
 git add C.c
 git commit -m 'finish #174-3 & #174'
 </pre>
+
+主流的做法似乎并不采用这种提交方式，相反，[`git squash`](https://ariejan.net/2011/07/05/git-squash-your-latests-commits-into-one/) 将连续的多个 commit 合并为一个却是常见做法。
 
 ####转移大文件
 
