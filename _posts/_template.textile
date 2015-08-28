@@ -1,0 +1,19 @@
+---
+layout: post
+title: "Spark 开发者动态"
+description: ""
+category: bigdata
+tags: [Spark]
+summary: OOM 问题，RDD checkpoint 技术，一些重要的 Spark 配置参数。
+---
+{% include JB/setup %}
+
+h2. 动态
+
+h3. OOM 问题
+
+最近一个月以来，我主要在分析 Spark OOM 的原因，其实在此之前已经有一些相关的分析工作。我梳理了这些工作，并结合自己的分析总结了 OOM 发生的原因：
+* 直接将大量数据读入内存。RDD 的 shuffle 类操作的 Reduce 阶段会将 partition 数据全部加载到内存中，如果提交 Spark Application 时，设置了每个 Worker 节点最大使用核数为 n（通过参数 spark.cores.max 设置集群总核数，含义是同时运行的最大任务数），每个 partition 数据大小为 x，那么 shuffle 操作的 Reduce 阶段将消耗 n*x 大小的内存。Spark-1.0.0 版本已经为 reduceByKey 操作实现了外部排序以减小内存开销，但是 sortByKey 的外部排序还未实现，目前 Spark 的开发者已经 开始这一块的工作，可参考 "这个链接":https://issues.apache.org/jira/browse/SPARK-983?jql=text%20~%20%22sortByKey%22 。为减少这类 shuffle 操作引发的 OOM 错误，用户可以在创建 RDD 时将 partition 数设置得大一些，这样 n*x 中的 x 会变小。但是，这也带来了副作用。
+* 文件 buffer 过大。即前文提到的副作用，Spark-1.0.0 中在执行 shuffle 类操作时，会根据 map 数（M 即 partition 数一般远大于 n）和 reduce 数（R，通过 spark.default.parallelism 参数设置）来生成 M*R  个 bucket 存放 shuffle 的输出数据，Spark-1.0.0 中的 BlockManager 模块会为每个 bucket 开启一个 100KB（可以通过 spark.shuffle.file.buffer.kb 配置）大小的 buffer，用来提高将 RDD 数据从内存导入导出到磁盘的速度。因此，增加 partition 在减小 n*x 中的 x 的同时，也增大了 M，即增大了 M，文件 buffer 开销变大。Spark 自 0.8.1（ "SPARK-JIRA-751":http://issues.apache.org/jira/browse/SPARK-751 ）起，引入了 shuffle consolidation 技术，通过配置 spark.shuffle.consolidateFiles 参数为 true 把 bucket 文件缓存开销降低至 n * R，依然会造成很大的开销，见  "SPARK-JIRA-2503":https://issues.apache.org/jira/browse/SPARK-2503 。shuffle consolidation 原理如下图[1]所示：
+!/pics/spark-shuffle-consolidate.png!
+
