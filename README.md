@@ -8,6 +8,7 @@ For all usage and documentation please see: <http://jekyllbootstrap.com>
 
 ## Version
 
+jekyll version: 2.4.0 [same as github, recommaned]
 0.3.0 - stable and versioned using [semantic versioning](http://semver.org/).
 
 **NOTE:** 0.3.0 introduces a new theme which is not backwards compatible in the sense it won't _look_ like the old version.
