@@ -57,38 +57,40 @@
     color: green;
   }
 </style>
-<div id="bm_power_bt">
-<a>查看导航</a>
-</div>
+
+<!--<div id="bm_power_bt">-->
+<!--<a>查看导航</a>-->
+<!--</div>-->
 
 <script src="/assets/jquery-2.1.1.min.js"></script>
 <script type="text/javascript" src="/assets/jqPlanize/jquery.planize.js"></script>
+
+<!-- 生成书签 -->
 <script type="text/javascript">
-  var originalBodyContent;
-  var bm_on = false;
-  function restoreBodyContent(include_toc) {
-    $('body').html(originalBodyContent);
-    if (include_toc) {
-      $('body').prepend('<div id="toc"></div>');
-    }
-  }
-  $(document).ready(function(){
-    originalBodyContent = $('body').html();
-    $('#bm_power_bt').on( 'click', function(e){
-      //alert('hi');
-      if (bm_on) {
-        $('#toc').addClass("hide");
-      bm_on=false;
-
-    } else {
-      bm_on=true;
-        $('#toc').removeClass("hide");
-    }
-    });
-
-  });
-  // generate bookmark
-  restoreBodyContent(true);
-  $('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
-  $('#toc').addClass("hide");
+//  var originalBodyContent;
+//  var bm_on = false;
+//  function restoreBodyContent(include_toc) {
+//    $('body').html(originalBodyContent);
+//    if (include_toc) {
+//      $('body').prepend('<div id="toc"></div>');
+//    }
+//  }
+//  $(document).ready(function(){
+//    originalBodyContent = $('body').html();
+//    $('#bm_power_bt').on( 'click', function(e){
+//      if (bm_on) {
+//        $('#toc').addClass("hide");
+//      bm_on=false;
+//
+//    } else {
+//      bm_on=true;
+//        $('#toc').removeClass("hide");
+//    }
+//    });
+//
+//  });
+//  // generate bookmark
+//  restoreBodyContent(true);
+//  $('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
+//  $('#toc').addClass("hide");
 </script>

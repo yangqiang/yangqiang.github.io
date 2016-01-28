@@ -29,3 +29,6 @@ title: Todo
 
 <img src="/pics/blog-bookmark-overwrite.png" />
 
+## 功能开关
+
+- 博客的书签：/home/jonny/Documents/yangqiang.github.io/_includes/themes/bootstrap-3/post.html 中修改。
