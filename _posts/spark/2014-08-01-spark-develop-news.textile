@@ -2,7 +2,7 @@
 layout: post
 title: "Spark 开发者动态"
 description: ""
-category: bigdata
+category: Bigdata
 tags: [Spark]
 summary: OOM 问题，RDD checkpoint 技术，一些重要的 Spark 配置参数。
 ---

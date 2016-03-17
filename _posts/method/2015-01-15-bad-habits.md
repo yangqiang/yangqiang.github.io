@@ -2,7 +2,7 @@
 layout: post
 title: "工作中的几个坏习惯"
 description: ""
-category: "method"
+category: "Method"
 tags: []
 summary: 一些工作中的见闻。
 ---

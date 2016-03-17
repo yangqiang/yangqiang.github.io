@@ -2,7 +2,7 @@
 layout: post
 title: "我的日常工作方法盘点"
 description: ""
-category: "method"
+category: "Method"
 tags: []
 summary: 一些简单的工作方法，一些常用的效率类软件推荐
 ---

@@ -2,7 +2,7 @@
 layout: post
 title: "git 协同开发的二三法则"
 description: ""
-category: "method"
+category: "Method"
 tags: [Git]
 summary: 为了减少协同开发带来的麻烦，必须遵守既定的原则来管理代码。
 ---

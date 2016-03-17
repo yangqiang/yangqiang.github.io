@@ -3,7 +3,7 @@ layout: post
 title: "优雅地提交：git commit"
 description: ""
 category: "Method"
-tags: [git]
+tags: [Git]
 summary: 不能一时图省事使用 `git add *'，而引发后续的 diff 灾难。
 ---
 {% include JB/setup %}

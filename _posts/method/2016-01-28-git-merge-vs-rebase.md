@@ -1,9 +1,9 @@
 ---
 layout: post
-title: "git协同开发：合并分支的选择，merge还是rebase？"
+title: "Git协同开发：合并分支的选择，merge还是rebase？"
 description: ""
-category: "method"
-tags: [git]
+category: "Method"
+tags: [Git]
 summary: 介绍 git 命令 merge 和 rebase 的异同及各自适用的场景。
 ---
 {% include JB/setup %}

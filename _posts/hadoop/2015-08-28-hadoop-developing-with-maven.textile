@@ -2,8 +2,8 @@
 layout: post
 title: "Hadoop编程手册：使用Idea + Maven"
 description: ""
-category: bigdata
-tags: [hadoop,maven]
+category: Bigdata
+tags: [Hadoop, Maven]
 summary: Hello, Hadoop!
 ---
 {% include JB/setup %}
