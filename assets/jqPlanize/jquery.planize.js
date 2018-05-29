@@ -47,7 +47,7 @@
       number_separator : '.',
       toc_elem         : null,
       toc_none         : '',
-      toc_title        : '概要'
+      toc_title        : '导航'
     };
     config = jQuery.extend(defaultConfig, config);
   
