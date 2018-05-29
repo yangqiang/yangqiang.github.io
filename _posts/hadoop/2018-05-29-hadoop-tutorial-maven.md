@@ -16,18 +16,15 @@ summary: Hello, Hadoop!
 使用Idea 创建 Maven 类型的项目
 
 ## 编写程序
-- 配置 pom.xml，添加如下代码：
+- 配置 pom.xml，添加如下代码：<!-- 以下是转义 HTML 标签的写法 -->
 <pre class="prettyprint xml">
-{% capture my_include %}
-<dependencies>
+{% capture my_include %}<dependencies>
     <dependency>
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-client</artifactId>
         <version>2.8.4</version>
     </dependency>
-</dependencies>
-{% endcapture %}
-{{ my_include | xml_escape }}
+</dependencies>{% endcapture %}{{ my_include | xml_escape }}
 </pre>
 
 - 编写 Hadoop 程序，如 [WordCount 程序](http://hadoop.apache.org/docs/r2.8.4/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html#Source_Code)

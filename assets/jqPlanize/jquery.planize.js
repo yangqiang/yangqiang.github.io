@@ -95,7 +95,7 @@
                 toc += elem;
               }
             }
-            prependText = '<span id="h' + hLevelText + '" style="display:block"></span><br/><br/>' + hLevelText;
+            prependText = '<span id="h' + hLevelText + '" style="display:block"></span>' + hLevelText;
           }
           if (config.number_suffix) {
             prependText += config.number_suffix;

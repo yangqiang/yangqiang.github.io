@@ -19,7 +19,7 @@
       {% assign categories_list = page.categories %}
       {% include JB/categories_list %}
     </ul>
-  {% endunless %}  
+  {% endunless %}
 
   {% unless page.tags == empty %}
     <ul class="tag_box inline">
@@ -27,8 +27,8 @@
       {% assign tags_list = page.tags %}
       {% include JB/tags_list %}
     </ul>
-  {% endunless %}  
-  
+  {% endunless %}
+
     <hr>
     <ul class="pagination">
     {% if page.previous %}
@@ -36,7 +36,7 @@
     {% else %}
       <li class="prev disabled"><a>&larr; Previous</a></li>
     {% endif %}
-      <li><a href="{{ BASE_PATH }}{{ site.JB.archive_path }}">尘封</a></li>
+      <li><a href="{{ BASE_PATH }}{{ site.JB.archive_path }}">归档</a></li>
     {% if page.next %}
       <li class="next"><a href="{{ BASE_PATH }}{{ page.next.url }}" title="{{ page.next.title }}">Next &raquo;</a></li>
     {% else %}
@@ -48,49 +48,63 @@
   </div>
 </div>
 <style>
-#bm_power_bt {
-  position: fixed;
-  top:40%;
-  right:40%;
-}
-  #bm_power_bt a {
-    color: green;
+  #bm_power_bt {
+    color: #428bca;
+    float: right;
+  }
+
+  #id-nav-close-btn {
+    float: right;
+    /*color: red;*/
+  }
+.content h1 span, .content h2 span, .content h3 span, .content h2 span {
+    margin-top: -55px;        /* Size of fixed header */
+    padding-bottom: 55px;
+    display: block;
   }
 </style>
-
-<!--<div id="bm_power_bt">-->
-<!--<a>查看导航</a>-->
-<!--</div>-->
 
 <script src="/assets/jquery-2.1.1.min.js"></script>
 <script type="text/javascript" src="/assets/jqPlanize/jquery.planize.js"></script>
 
 <!-- 生成书签 -->
 <script type="text/javascript">
-//  var originalBodyContent;
-//  var bm_on = false;
-//  function restoreBodyContent(include_toc) {
-//    $('body').html(originalBodyContent);
-//    if (include_toc) {
-//      $('body').prepend('<div id="toc"></div>');
-//    }
-//  }
-//  $(document).ready(function(){
-//    originalBodyContent = $('body').html();
-//    $('#bm_power_bt').on( 'click', function(e){
-//      if (bm_on) {
-//        $('#toc').addClass("hide");
-//      bm_on=false;
-//
-//    } else {
-//      bm_on=true;
-//        $('#toc').removeClass("hide");
-//    }
-//    });
-//
-//  });
-//  // generate bookmark
-//  restoreBodyContent(true);
-//  $('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
-//  $('#toc').addClass("hide");
+ var originalBodyContent;
+ var bm_on = false;
+ var navButton = '<span id="bm_power_bt">查看导航</span>';
+ var navCloseBtn = '<span id="id-nav-close-btn">X</span>';
+ function restoreBodyContent(include_toc) {
+   $('body').html(originalBodyContent);
+   if (include_toc) {
+     $('body').prepend('<div id="toc"></div>');
+   }
+ }
+
+ function showNav(show) {
+     if (!show) {
+         $('#toc').addClass("hide");
+         bm_on=false;
+         $('#bm_power_bt').text('查看导航');
+     } else {
+         bm_on=true;
+         $('#toc').removeClass("hide");
+         $('#bm_power_bt').text('隐藏导航');
+     }
+ }
+ $(document).ready(function(){
+   originalBodyContent = $('body').html();
+   $('#bm_power_bt').on('click', function(e){
+     showNav(!bm_on);
+   });
+   $('#id-nav-close-btn').click(function (event) {
+       showNav(false);
+   });
+
+ });
+ // generate bookmark
+ restoreBodyContent(true);
+ $('html *').planize({ number_suffix: '.', generate_toc: true, min_level: 2, max_level:3, toc_elem: $('#toc') });
+ $('#toc').addClass("hide");
+ $('#toc h4').append(navCloseBtn);
+ $('.date').append(navButton);
 </script>
