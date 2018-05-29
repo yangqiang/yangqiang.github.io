@@ -11,7 +11,6 @@ summary: Hello, Hadoop!
 
 ## 安装 idea IDE
 下载网址：http://www.jetbrains.com/idea/
-进入下列步骤之前，请先阅读资料： "140604-Maven初探-v2.pdf":/attachs/140604-Maven-intro-v2.pdf
 
 ## 使用 Maven 创建 Hadoop 项目
 使用Idea 创建 Maven 类型的项目
@@ -19,13 +18,16 @@ summary: Hello, Hadoop!
 ## 编写程序
 - 配置 pom.xml，添加如下代码：
 <pre class="prettyprint xml">
+{% capture my_include %}
 <dependencies>
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-client</artifactId>
-            <version>2.8.4</version>
-        </dependency>
-    </dependencies>
+    <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-client</artifactId>
+        <version>2.8.4</version>
+    </dependency>
+</dependencies>
+{% endcapture %}
+{{ my_include | xml_escape }}
 </pre>
 
 - 编写 Hadoop 程序，如 [WordCount 程序](http://hadoop.apache.org/docs/r2.8.4/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html#Source_Code)
