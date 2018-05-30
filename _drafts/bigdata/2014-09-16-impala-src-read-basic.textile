@@ -1,0 +1,145 @@
+---
+layout: post
+title: "Impala 代码阅读基础"
+description: ""
+category: bigdata
+tags: [Impala]
+summary: 
+---
+{% include JB/setup %}
+
+h2. 版本及工具
+
+版本：cdh5-1.4_5.1.2
+工具： "Jetbrains CLion":http://www.jetbrains.com/clion/ 或者 "eclipse for C++":https://www.eclipse.org/downloads/packages/eclipse-ide-cc-developers/lunar
+
+h2. 代码目录结构
+
+<pre>
+[jonny@sg108 Impala-cdh5-1.4_5.1.2] (branch:cdh5-1.4_5.1.2) $ ls
+be           CMakeLists.txt  ext-data-source  llvm-ir   testdata    www
+bin          cmake_modules   fe               shell     tests
+buildall.sh  common          LICENSE.txt      ssh_keys  thirdparty
+</pre>
+
+be/: 关于后台处理的代码；
+fe/: 目录下存放的是前端代码：
+common/thrift/: .thrift 相关；
+shell/: Python CLI shell
+
+<pre>
+[jonny@sg108 Impala-cdh5-1.4_5.1.2] (branch:cdh5-1.4_5.1.2) $ ls be/src/
+benchmarks  common       exprs           runtime     statestore  udf
+catalog     exec         resourcebroker  scheduling  testutil    udf_samples
+codegen     experiments  rpc             service     transport   util
+</pre>
+
+codegen/: LLVM IR generation
+exec/: PlanNode implementation
+exprs/: Math, date, string, time, agg, etc
+runtime/: Coordinator, Executor, etc
+service/: main(), thrift server
+statestore/: State store
+
+<pre>
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+C++                            293           9485          11734          59632
+C/C++ Header                   262           7232          15114          19882
+CMake                           24            152            334            516
+Python                           1             17             34            155
+-------------------------------------------------------------------------------
+SUM:                           580          16886          27216          80185
+-------------------------------------------------------------------------------
+</pre>
+
+be/src 下总共有8万行 C++ 代码左右。
+
+<pre>
+----------------------------------------------------------------------------------------
+Language                              files          blank        comment           code
+----------------------------------------------------------------------------------------
+XML                                      93          16157          14954         584757
+C                                       750          62017          46628         309202
+Bourne Shell                            348          44393          48111         280834
+C++                                     757          42689          49922         246001
+Java                                    617          30724          31856         182633
+C/C++ Header                           1095          38243          71944         179161
+m4                                      112           8658           2095          75586
+Python                                  251          12618          14724          62274
+PHP                                      74           4582           3172          48336
+HTML                                    169           2480           1084          35479
+Javascript                               84           2668           2382          20451
+Ruby                                    183           3669           4243          17533
+SQL                                     162           4263           3794          14761
+D                                        64           2751           5796          13231
+JSON                                      5              0              0          10294
+make                                    116           1999           2712          10282
+Go                                       58           1121           1959          10113
+Bourne Again Shell                       24           1639           2480           9525
+MSBuild script                           42             12            131           8020
+CSS                                      15           1303            211           7785
+Pascal                                   22           1444           1198           6644
+Perl                                     31           1262           1568           6540
+C#                                       50            847           1576           5165
+Maven                                    11            138            350           3324
+Erlang                                   33            671            937           2844
+DOS Batch                                33            512            299           2508
+CMake                                    56            525           1041           2360
+yacc                                      1            169            156           1738
+ASP.Net                                   4             62              0           1095
+Haskell                                  16            335            319           1060
+Objective C                              13            281            253           1039
+ActionScript                             30            316            773           1017
+Windows Resource File                     3            379              1            936
+Ant                                       6            157            152            844
+OCaml                                    11            116            165            839
+Velocity Template Language                1              4              2            539
+XSLT                                      6             65            117            371
+Lisp                                      2             19             22            179
+Expect                                    5              0             55            162
+Assembly                                  1              8             33            128
+awk                                       2             15             22             70
+Tcl/Tk                                    1              2              7             45
+vim script                                1             12             42             37
+Windows Message File                      1              3             11             14
+Windows Module Definition                 1              0              0              1
+----------------------------------------------------------------------------------------
+SUM:                                   5360         289328         317297        2165757
+----------------------------------------------------------------------------------------
+</pre>
+
+可以看到 C++ 代码有 17 万行，因此必须有选择地阅读。
+
+h2. 阅读方法
+
+从以下几个文件和函数开始入手：
+
+be/src/service 目录下：
+*impala-beeswax-server.cc*
+* void ImpalaServer::query(QueryHandle& query_handle, const Query& query)
+
+*impala-server.cc*
+* Status ImpalaServer::QueryExecState::Exec(TExecRequest* exec_request)
+* Status ImpalaServer::ExecuteInternal(
+const TQueryCtx& query_ctx,
+shared_ptr<SessionState> session_state,
+bool* registered_exec_state,
+shared_ptr<QueryExecState>* exec_state)
+
+be/src/runtime 目录下：
+*coordinator.cc*
+* Status Coordinator::Exec(const TUniqueId& query_id, TQueryExecRequest* request, const TQueryOptions& query_options)
+* Status Coordinator::ExecRemoteFragment(void* exec_state_arg)
+
+*plan-fragment-executor.cc*
+
+参考这三篇博客：
+# "Impala架构和RPC":http://yanbohappy.sinaapp.com/?p=314
+# "SQL解析与执行计划生成":http://yanbohappy.sinaapp.com/?p=339
+# "backend查询执行过程":http://yanbohappy.sinaapp.com/?p=365
+
+h2. 参考资料
+
+"Impala introduction":http://www.sizeofvoid.net/cloudera-impala-introduction/

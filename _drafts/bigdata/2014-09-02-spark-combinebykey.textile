@@ -1,0 +1,163 @@
+---
+layout: post
+title: "Spark RDD combineByKey 研究"
+description: ""
+category: bigdata
+tags: [Spark,RDD,Shuffle]
+summary: 
+---
+{% include JB/setup %}
+
+h2. Spark 版本
+
+1.0.0
+
+h2. 细节
+
+combineByKey 方法的功能是，将 RDD[(K, V)] 转变成 RDD[(K, C)] ，一般 C 是 Seq[V]。
+PariedRDDFunctions.combineByKey 方法的代码如下：
+
+<pre class="prettyprint scala">
+  def combineByKey[C](createCombiner: V => C,
+      mergeValue: (C, V) => C,
+      mergeCombiners: (C, C) => C,
+      partitioner: Partitioner,
+      mapSideCombine: Boolean = true,
+      serializer: Serializer = null): RDD[(K, C)] = {
+    ...
+    val aggregator = new Aggregator[K, V, C](createCombiner, mergeValue, mergeCombiners)
+    if (self.partitioner == Some(partitioner)) {
+      self.mapPartitionsWithContext((context, iter) => {
+        new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
+      }, preservesPartitioning = true)
+    } else if (mapSideCombine) {
+      val combined = self.mapPartitionsWithContext((context, iter) => {
+        aggregator.combineValuesByKey(iter, context)
+      }, preservesPartitioning = true)
+      val partitioned = new ShuffledRDD[K, C, (K, C)](combined, partitioner)
+        .setSerializer(serializer)
+      partitioned.mapPartitionsWithContext((context, iter) => {
+        new InterruptibleIterator(context, aggregator.combineCombinersByKey(iter, context))
+      }, preservesPartitioning = true)
+    } else {
+      // Don't apply map-side combiner.
+      val values = new ShuffledRDD[K, V, (K, V)](self, partitioner).setSerializer(serializer)
+      values.mapPartitionsWithContext((context, iter) => {
+        new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
+      }, preservesPartitioning = true)
+    }
+  }
+</pre>
+
+if (self.partitioner == Some(partitioner)) 检测 RDD 有没有按指定的方法做 partition，如果有则无需再做。 
+否则会创建 ShuffledRDD，在调度时（shffule map）会按 partitioner 指定的方式将数据写入 buckets，其 compute 方法会进行 shuffle reduce，通过 fetch 方法获取各 worker 上的 bucket 文件，构造迭代器，在 BlockStoreShuffleFetcher 类中有实现。（细节）
+
+<pre class="prettyprint scala">
+  override def compute(split: Partition, context: TaskContext): Iterator[P] = {
+    val shuffledId = dependencies.head.asInstanceOf[ShuffleDependency[K, V]].shuffleId
+    val ser = Serializer.getSerializer(serializer)
+    SparkEnv.get.shuffleFetcher.fetch[P](shuffledId, split.index, context, ser)
+  }
+</pre>
+
+这里的 Aggregator.combineValuesByKey 实现了 combineByKey 的逻辑：
+
+<pre class="prettyprint scala">
+case class Aggregator[K, V, C] (
+    createCombiner: V => C,
+    mergeValue: (C, V) => C,
+    mergeCombiners: (C, C) => C) {
+
+  private val externalSorting = SparkEnv.get.conf.getBoolean("spark.shuffle.spill", true)
+
+  ...
+
+  def combineValuesByKey(iter: Iterator[_ <: Product2[K, V]],
+                         context: TaskContext): Iterator[(K, C)] = {
+    if (!externalSorting) {
+      ...
+    } else {
+      val combiners = new ExternalAppendOnlyMap[K, V, C](createCombiner, mergeValue, mergeCombiners)
+      while (iter.hasNext) {
+        val (k, v) = iter.next()
+        combiners.insert(k, v)
+      }
+      ...
+    }
+  }
+</pre>
+
+ExternalAppendOnlyMap 会在内存不足时，将排好序的数据转移到磁盘，实现了外部归并过程。
+
+<pre class="prettyprint scala">
+class ExternalAppendOnlyMap[K, V, C](
+    createCombiner: V => C,
+    mergeValue: (C, V) => C,
+    mergeCombiners: (C, C) => C,
+    serializer: Serializer = SparkEnv.get.serializer,
+    blockManager: BlockManager = SparkEnv.get.blockManager)
+  extends Iterable[(K, C)] with Serializable with Logging {
+  ...
+  private var currentMap = new SizeTrackingAppendOnlyMap[K, C]
+  private val spilledMaps = new ArrayBuffer[DiskMapIterator]
+  private val sparkConf = SparkEnv.get.conf
+  private val diskBlockManager = blockManager.diskBlockManager
+  ...
+  
+  /**
+   * Sort the existing contents of the in-memory map and spill them to a temporary file on disk.
+   */
+  private def spill(mapSize: Long) {
+    ...
+    val (blockId, file) = diskBlockManager.createTempBlock()
+    var writer = blockManager.getDiskWriter(blockId, file, serializer, fileBufferSize)
+    ...
+
+    try {
+      // 保证输出的 Map 是按 key 排过序的
+      val it = currentMap.destructiveSortedIterator(comparator)
+      while (it.hasNext) {
+        val kv = it.next()
+        writer.write(kv)
+        objectsWritten += 1
+
+        ...
+      }
+      if (objectsWritten > 0) {
+        flush()
+      }
+    } finally {
+      // Partial failures cannot be tolerated; do not revert partial writes
+      writer.close()
+    }
+
+    // 清空内存中的 Map（旧内容不久会被回收）
+    currentMap = new SizeTrackingAppendOnlyMap[K, C]
+    // 把已经分裂的 Map 保存起来
+    spilledMaps.append(new DiskMapIterator(file, blockId, batchSizes))
+
+    // Reset the amount of shuffle memory used by this map in the global pool
+    val shuffleMemoryMap = SparkEnv.get.shuffleMemoryMap
+    shuffleMemoryMap.synchronized {
+      shuffleMemoryMap(Thread.currentThread().getId) = 0
+    }
+    numPairsInMemory = 0
+    _memoryBytesSpilled += mapSize
+  }
+</pre>
+
+spill 是在每个 Partition 里做的操作吗？是的，这意味着每个 partition 的数据都会处理一次，全局并没有 merge，这个过程与 Hadoop 中的 Map Side Shuffle 阶段极为相似。
+
+<pre class="prettyprint scala">
+self.mapPartitionsWithContext((context, iter) => {
+        new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
+      }, preservesPartitioning = true)
+</pre>
+
+
+使用 ExternalIterator 实现了 merge 过程，并模拟了 RDD Iterator，从多个队列中读取数据。
+队列维护了若干个 Map SortedIterator，每次调用 next() 方法时，取出个 Iterator 最小的 key 及其 value，并进行 combine。
+
+h2. groupByKey
+
+groupByKey 是使用 combineByKey 实现的，使用的是 HashPartitioner。

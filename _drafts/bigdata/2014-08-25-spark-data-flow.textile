@@ -1,0 +1,125 @@
+---
+layout: post
+title: "Spark RDD 中的数据流动"
+description: ""
+category: bigdata
+tags: [Spark]
+summary: 
+---
+{% include JB/setup %}
+
+h2. 简介
+
+以一个经典的 WordCount 算法为例，研究 Spark 是如何从文件读入数据到 RDD，又是如何利用 Scala 语言的 Iterator 数据结构来保存中间计算数据的。
+
+h2. 代码
+
+<pre class="prettyprint scala linenums">
+val data = sc.textFile("/test/wordcount_test.txt")
+val words = data.flatMap(i => i.split("\\s+"))
+val wc = words.map( i => (i, 1) )
+val results = wc.reduceByKey(_+_)
+val distinct_word_num = results.count
+</pre>
+
+对象标记：
+A: org.apache.spark.InterruptibleIterator
+B: scala.collection.Iterator$
+
+table(table table-bordered).
+|_. 代码行号执行后 |_. B 对象的个数 |_. 备注 |
+|0|1|
+|1|1|没有提交 job|
+|2|1|没有提交 job|
+|3|1|
+|4|1|
+|5|1|
+|a|{color:red}. styled|cell|
+
+h2. 分析
+
+第1行代码会创建一个 HadoopRDD[String] 对象，但数据并没有加载到内存；
+第2行代码会创建一个 FlatMappedRDD[String] 对象；
+第3行代码创建一个 MappedRDD[(String, Int)] 对象；
+第4行代码先将对象转换为 PairRDDFunctions[(String, Int)] 对象 ，这里有点难以理解，效果就是可以调用类型 Scala 中 Map 数据结构含有的方法；
+第5行代码会提交 Job。
+
+h3. Stage 划分
+
+从 Spark 运行时输出的日志信息可以看出，以上代码提交后会生成1个 Job，而这个 Job 包含两个 Stage：
+Stage 1：wordcount_text.txt -> data -> words -> wc -> [shuffle bucket files]
+Stage 0: [shuffle bucket files] -> results -> distinct_word_num
+
+由于 RDD 的灵活性，计算过程中所使用的 compute 方法有许多种。这两个 Stage 内数据流转过程中所使用的方法如下：
+
+<pre>
+Stage 1：wordcount_test.txt --  HadoopRDD.compute() --> data -- FlatMappedRDD.compute() --> words -- MappedRDD.compute() --> wc -- ShuffleMapTask.runTask() --> [shuffle bucket files]
+Stage 0: [shuffle bucket files] -- ShuffledRDD.compute --> results -- ResultTask.runTask() --> distinct_word_num
+</pre>
+
+h3. RDD 缓存
+
+由于 iterator 的使用很危险，所以 RDD 必须严格控制此方法的使用。
+为了避免数据使用后“挥发”（因为使用的是 Iterator），RDD.iterator 方法会将计算得到的数据缓存到 CacheManager 中。
+
+RDD 的 storageLevel != StorageLevel.NONE 时，其计算所得数据会使用 BlockManager 来缓存。以上两个 Stage 中的数据：data, words, wc, result 都会被缓存起来？（确定？）
+
+重要代码：
+HadoopRDD.compute()
+
+<pre class="prettyprint scala">
+  override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
+    val iter = new NextIterator[(K, V)] {
+
+      val split = theSplit.asInstanceOf[HadoopPartition]
+      logInfo("Input split: " + split.inputSplit)
+      var reader: RecordReader[K, V] = null
+      val jobConf = getJobConf()
+      val inputFormat = getInputFormat(jobConf)
+      HadoopRDD.addLocalConfiguration(new SimpleDateFormat("yyyyMMddHHmm").format(createTime),
+        context.stageId, theSplit.index, context.attemptId.toInt, jobConf)
+      reader = inputFormat.getRecordReader(split.inputSplit.value, jobConf, Reporter.NULL)
+
+      // Register an on-task-completion callback to close the input stream.
+      context.addOnCompleteCallback{ () => closeIfNeeded() }
+      val key: K = reader.createKey()
+      val value: V = reader.createValue()
+      override def getNext() = {
+        try {
+          finished = !reader.next(key, value)
+        } catch {
+          case eof: EOFException =>
+            finished = true
+        }
+        (key, value)
+      }
+
+      ...
+    }
+    new InterruptibleIterator[(K, V)](context, iter)
+  }
+</pre>
+
+ShuffleRDD.compute()
+
+<pre class="prettyprint scala">
+  override def compute(split: Partition, context: TaskContext): Iterator[P] = {
+    val shuffledId = dependencies.head.asInstanceOf[ShuffleDependency[K, V]].shuffleId
+    val ser = Serializer.getSerializer(serializer)
+    SparkEnv.get.shuffleFetcher.fetch[P](shuffledId, split.index, context, ser)
+  }
+</pre>
+
+CacheManager.getOrCompute()
+
+<pre class="prettyprint scala">
+  def getOrCompute[T](rdd: RDD[T], split: Partition, context: TaskContext,
+      storageLevel: StorageLevel): Iterator[T] = {
+      val key = RDDBlockId(rdd.id, split.index)
+    logDebug("Looking for partition " + key)
+    blockManager.get(key) match {
+	  ...
+	}
+	...
+  }
+</pre>

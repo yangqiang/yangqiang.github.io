@@ -1,0 +1,105 @@
+---
+layout: post
+title: "Spark RDD join 实现原理"
+description: ""
+category: bigdata
+tags: [Spark]
+summary: 
+---
+{% include JB/setup %}
+
+h2. 版本
+
+Spark 1.0.0
+
+h2. 示例
+
+RDD A 与 RDD B 做 join 操作时，A 和 B 的 key 必须是同一个对象。如 comments 和 consumer 做 join 时，它们的 key 都是 u_id。Spark 在 PairRDDFunctions 这个类中定义了 join 函数。
+
+<pre class="prettyprint scala">
+// (p_id, p_name, p_price)
+val p_data = sc.textFile("/test/data/product.txt").map( i => i.split(" ") )
+// (u_id, u_name)
+val cs_data = sc.textFile("/test/data/consumer.txt").map( i => i.split(" ") )
+// (cm_id, u_id, p_id, score)
+val cm_data = sc.textFile("/test/data/comments.txt").map( i => i.split(" ") )
+
+// (u_id, u_name)
+val consumers = cs_data.map(i => (i(0).toInt, i(1)))
+// (u_id, (cm_id, p_id, score))
+val comments = cm_data.map(i => (i(1).toInt, (i(0), i(2), i(3))))
+// (u_id, ((cm_id, p_id, score), u_name))
+val uc = comments.join(consumers)
+
+// "rotate" (u_id, ((cm_id, p_id, score), u_name)) to (p_id, (cm_id, score, u_name))
+val uc_ = uc.map(i => (i._2._1._2.toInt, (i._2._1._1, i._2._1._3, i._2._2)))
+
+// (p_id, (p_name, p_price))
+val products = p_data.map(i => (i(0).toInt, (i(1), i(2))))
+// (p_id, ((cm_id, score, u_name), (p_name, p_price)))
+val ucp = uc_.join(products)
+
+// (cm_id, (u_name, p_name, score))
+val result = ucp.map(i => (i._2._1._1, (i._2._1._3, i._2._2._1, i._2._1._2)))
+
+result.sortByKey().collect
+</pre>
+
+h2. join() 函数如何工作
+
+PairRDDFunctions.join() -> PairRDDFunctions.cogroup() -> CoGroupedRDD.compute
+cogroup() 函数内容如下：
+
+<pre class="prettyprint scala linenums">
+  /**
+   * For each key k in `this` or `other`, return a resulting RDD that contains a tuple with the
+   * list of values for that key in `this` as well as `other`.
+   */
+  def cogroup[W](other: RDD[(K, W)], partitioner: Partitioner)
+      : RDD[(K, (Iterable[V], Iterable[W]))]  = {
+    if (partitioner.isInstanceOf[HashPartitioner] && keyClass.isArray) {
+      throw new SparkException("Default partitioner cannot partition array keys.")
+    }
+    val cg = new CoGroupedRDD[K](Seq(self, other), partitioner)
+    cg.mapValues { case Seq(vs, ws) =>
+      (vs.asInstanceOf[Seq[V]], ws.asInstanceOf[Seq[W]])
+    }
+  }
+</pre>
+
+从第 10 行代码可以看出，join 结果会产生一个 CoGroupedRDD：由三个变量确定：self（即 RDD A）, other（即 RDD B）, partitioner。
+
+h3. 何时 shuffle
+
+A.join(B) 时，哪些数据会被 shuffle，取决于 A 和 B 的 partition 情况。
+
+h4. CoGroupedRDD
+
+CoGroupedRDD 会检查所有被关联的数据，分析它们的 dependency：
+* 如果 RDD 已经按指定的方式划分 partition，则无需执行 shuffle 操作；
+* 否则创建新的 ShuffleDependency，即执行 shuffle 操作。
+
+<pre class="prettyprint scala">
+  override def getDependencies: Seq[Dependency[_]] = {
+    rdds.map { rdd: RDD[_ <: Product2[K, _]] =>
+      if (rdd.partitioner == Some(part)) {
+        logDebug("Adding one-to-one dependency with " + rdd)
+        new OneToOneDependency(rdd)
+      } else {
+        logDebug("Adding shuffle dependency with " + rdd)
+        new ShuffleDependency[Any, Any](rdd, part, serializer)
+      }
+    }
+  }
+</pre>
+
+h4. ShuffledRDD
+
+ShuffledRDD 一定会生成 ShuffleDependency。
+
+如果 CoGroupedRDD 中的子 RDD 含有 partitioner，其依赖关系会退化，极端情况退化为 Narrow Dependency。RDD NSDI 论文中提到：当 RDD join 操作的对象数据的切分与该 RDD 数据切分方式相同时，join 结果与这两个 RDD 之间的依赖关系是 Narrow Dependency。原文内容如下：
+
+pre. Joining two RDDs may lead to either two narrow dependencies (if they are both hash/range partitioned with the same partitioner), two wide dependencies, or a mix (if one parent has a partitioner and one does not). In either case, the output RDD has a partitioner (either one inherited from the parents or a default hash partitioner).
+
+这里的 co-partitioned 指的是采用相同的 partitioner，即 RDD A 和 RDD B 中，相同 key 的元素都在同一个节点内，此时不需要做 shuffle 操作。
+

@@ -1,0 +1,251 @@
+---
+layout: post
+title: "RDD 的 checkpoint 技术"
+description: ""
+category: bigdata
+tags: [Spark]
+summary: RDD 的作用及原理
+---
+{% include JB/setup %}
+
+h2. 为什么需要 checkpoint
+
+Spark 是一个典型的内存计算系统，计算过程中会产生大量的中间数据，这些数据主要是以 RDD 的形式存在。这便会引发两个问题：
+* 内存的急剧膨胀
+* 一旦发生错误，重新生成 RDD 将会消耗大量计算资源
+
+RDD checkpoint 技术正是为解决这两个问题，其主要实现思路如下：
+* 将 wide dependency 类的操作生成的 RDD 持久化，目前是存放在 HDFS 中
+* 已经持久化的 RDD 会删除对 parent RDDs 的引用，结合 ContextCleaner 来清理内存空间
+
+h2. 相关源代码
+
+RDD.computeOrReadCheckpoint：在对 RDD 做计算的时候，调用此方法取数据，此方法会调用 RDD.iterator 方法从缓存读取数据，可参考： "Spark 执行步骤详解：以 sortByKey 为例":/bigdata/2014/07/21/spark-sort-precedures/#h4.3
+
+<pre  class="prettyprint scala">
+  /**
+   * Compute an RDD partition or read it from a checkpoint if the RDD is checkpointing.
+   */
+  private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] =
+  {
+    if (isCheckpointed) firstParent[T].iterator(split, context) else compute(split, context)
+  }
+</pre>
+
+RDD.checkpoint 为 RDD 生成 RDDCheckpointData 对象，这一步并不会立即将数据写入 HDFS。
+从注释可以看出，RDD 做 checkpoint 操作之后会删除对 lineage 中 parent RDD 的引用，这是通过 RDDCheckpointData.doCheckpoint 来实现的。
+
+<pre class="prettyprint scala">
+  /**
+   * Mark this RDD for checkpointing. It will be saved to a file inside the checkpoint
+   * directory set with SparkContext.setCheckpointDir() and all references to its parent
+   * RDDs will be removed. This function must be called before any job has been
+   * executed on this RDD. It is strongly recommended that this RDD is persisted in
+   * memory, otherwise saving it on a file will require recomputation.
+   */
+  def checkpoint() {
+    if (context.checkpointDir.isEmpty) {
+      throw new Exception("Checkpoint directory has not been set in the SparkContext")
+    } else if (checkpointData.isEmpty) {
+      checkpointData = Some(new RDDCheckpointData(this))
+      checkpointData.get.markForCheckpoint()
+    }
+  }
+</pre>
+
+SparkContext.runJob() 方法的末尾会调用 RDD.doCheckpoint() 方法，参考： "Spark 执行步骤详解：以 sortByKey 为例":/bigdata/2014/07/21/spark-sort-precedures/#h4.2
+从 RDD.doCheckpoint() 方法的代码可以看出， *执行过 checkpoint() 方法的 RDD* 在提交 job 之后才会触发 checkpointData.get.doCheckpoint() ，checkpointData 会调用 CheckpointRDD.writeToFile() 方法将数据保存到 HDFS。
+
+<pre class="prettyprint scala">
+  /**
+   * Performs the checkpointing of this RDD by saving this. It is called after a job using this RDD
+   * has completed (therefore the RDD has been materialized and potentially stored in memory).
+   * doCheckpoint() is called recursively on the parent RDDs.
+   */
+  private[spark] def doCheckpoint() {
+    if (!doCheckpointCalled) {
+      doCheckpointCalled = true
+      if (checkpointData.isDefined) {
+        checkpointData.get.doCheckpoint()
+      } else {
+        dependencies.foreach(_.rdd.doCheckpoint())
+      }
+    }
+  }
+</pre>
+
+
+RDDCheckpointData.doCheckpoint 会调用 rdd.markCheckpointed 来更新 RDD 的 partition 和 dependencies。
+RDDCheckpointData.clearTaskCaches() 清除计算过程中序列化/反序列化产生的缓存数据。
+
+<pre class="prettyprint scala">
+private[spark] object RDDCheckpointData {
+  def clearTaskCaches() {
+    ShuffleMapTask.clearCache()
+    ResultTask.clearCache()
+  }
+}
+</pre>
+
+<pre class="prettyprint scala">
+  def clearCache() {
+    synchronized {
+      serializedInfoCache.clear()
+    }
+  }
+  
+  // A simple map between the stage id to the serialized byte array of a task.
+  // Served as a cache for task serialization because serialization can be
+  // expensive on the master node if it needs to launch thousands of tasks.
+  private val serializedInfoCache = new HashMap[Int, Array[Byte]]
+
+  def serializeInfo(stageId: Int, rdd: RDD[_], func: (TaskContext, Iterator[_]) => _): Array[Byte] =
+  {
+    synchronized {
+      val old = serializedInfoCache.get(stageId).orNull
+      if (old != null) {
+        old
+      } else {
+        val out = new ByteArrayOutputStream
+        val ser = SparkEnv.get.closureSerializer.newInstance()
+        val objOut = ser.serializeStream(new GZIPOutputStream(out))
+        objOut.writeObject(rdd)
+        objOut.writeObject(func)
+        objOut.close()
+        val bytes = out.toByteArray
+        serializedInfoCache.put(stageId, bytes)
+        bytes
+      }
+    }
+  }
+</pre>
+
+RDD.doCheckpoint 用于标记 RDD 的状态（是否已经做过 checkpoint），RDD 的许多数据都是优先从其对应的 RDDCheckpointData 中取。
+
+*ContextCleaner 是一个异步清理 RDD 数据的类/对象*，见 org.apache.spark.ContextCleaner.scala。
+
+h2. checkpoint 技术分析
+
+以 PageRank 应用为例，其 lineage 如下：
+!/pics/spark-pagerank-lineage.png!
+对应代码
+
+<pre class="prettyprint scala">
+val links = spark.textFile(...).map(...).persist()
+var ranks = // RDD of (URL, rank) pairs
+for (i <- 1 to ITERATIONS) {
+  // Build an RDD of (targetURL, float) pairs
+  // with the contributions sent by each page
+  val contribs = links.join(ranks).flatMap {
+    (url, (links, rank)) =>
+    links.map(dest => (dest, rank/links.size))
+  }
+  // Sum contributions by URL and get new ranks
+  ranks = contribs.reduceByKey((x,y) => x+y).mapValues(sum => a/N + (1-a)*sum)
+}
+</pre>
+
+可以看出：
+# -为了避免出现内存急剧膨胀的问题，- checkpoint 技术删除对 parent RDD 的引用，比如 ranks1 做完 checkpoint 之后会删除对 contribs0 的引用 -，从而回收其内存- 。
+# 为提高 RDD 的容错性，checkpoint 操作将 RDD 数据备份在 HDFS 中。
+
+h2. 思考
+
+* Spark 究竟有没有自动做 checkpoint？
+答：没有，只有当编程者或用户手动为某个 RDD 调用 checkpoint() 方法时，RDD 数据才会被保存。SparkContext.runJob 里调用的是 doCheckpoint() 方法。
+
+* 内存不够的时候，checkpoint 技术还能否正常使用？
+一些数据量不大，但经过较复杂的计算才得到的数据需要使用 checkpoint 技术来保存。
+
+* 在错误发生时，未做 checkpoint 的 RDD 和做过 checkpoint 的 RDD 是如何重新生成的？
+
+* RDD 的 firstParent 与其他 parent 有何不同？
+
+<pre>
+  /** Returns the first parent RDD */
+  protected[spark] def firstParent[U: ClassTag] = {
+    dependencies.head.rdd.asInstanceOf[RDD[U]]
+  }
+</pre>
+
+h2. 实例
+
+spark-1.0.0 spark-shell
+
+<pre>
+sc.setCheckpointDir("/spark/checkpoints")	// 设置 checkpoint 存放的路径
+val lines = sc.textFile("/test/item.txt")
+lines.checkpoint
+lines.count
+</pre>
+
+输出的日志信息中有这么一行
+
+pre. 14/08/20 16:22:24,740 INFO rdd.RDDCheckpointData: Done checkpointing RDD 3 to hdfs://sg201:9000/spark/checkpoints/0738c214-976a-45a1-99ce-967b5e890968/rdd-3, new parent is RDD 4
+
+在 HFDS 的 /spark/checkpoints/0738c214-976a-45a1-99ce-967b5e890968目录下也能看到保存的 rdd 数据。
+接下来执行
+
+<pre>
+val m = lines.map(a => (a, 1))
+m.count
+</pre>
+
+日志信息中并没有 checpoint 相关的信息，而执行
+
+<pre>
+val m = lines.map(a => (a, 1))
+m.checkpoint
+m.count
+</pre>
+
+或者
+
+<pre>
+val ms = m.sortByKey()
+ms.checkpoint
+ms.count
+</pre>
+
+则会有 checkpoint 相关的信息出现：
+
+pre. 14/08/20 16:53:50,863 INFO rdd.RDDCheckpointData: Done checkpointing RDD 10 to hdfs://sg201:9000/spark/checkpoints/0738c214-976a-45a1-99ce-967b5e890968/rdd-10, new parent is RDD 11
+
+有个问题：此时的 lines 是否被释放？
+如果还存在对它的引用则不会。m 在做完 checkpoint 之后会删除对它的引用，但是，可能还存在其它引用它的 RDD。
+
+可见，只有并非只有 wide dependencies 类的操作才会触发 checkpoint 操作。
+
+h2. 参考资料
+
+RDD 论文 5.4 小节内容摘录如下：
+
+<p>
+Although lineage can always be used to recover RDDs
+after a failure, such recovery may be time-consuming for
+RDDs with long lineage chains. Thus, it can be helpful
+to checkpoint some RDDs to stable storage.
+
+In general, checkpointing is useful for RDDs with long
+lineage graphs containing wide dependencies, such as
+the rank datasets in our PageRank example (x3.2.2). In
+these cases, a node failure in the cluster may result in
+the loss of some slice of data from each parent RDD, 
+requiring a full recomputation [20]. In contrast, for RDDs
+with narrow dependencies on data in stable storage, such
+as the points in our logistic regression example (x3.2.1)
+and the link lists in PageRank, checkpointing may never
+be worthwhile. If a node fails, lost partitions from these
+RDDs can be recomputed in parallel on other nodes, at a
+fraction of the cost of replicating the whole RDD.
+</p>
+
+可以看出 checkpoint 的设计初衷是为了减小长 lineage 上的 wide dependencies 出错时的恢复成本。
+
+几则 JIRA
+
+"making comments of RDD.doCheckpoint consistent with its usage":https://issues.apache.org/jira/browse/SPARK-1299?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22checkpoint%22
+"Provide memory-and-local-disk RDD checkpointing":https://issues.apache.org/jira/browse/SPARK-1855?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22checkpoint%22
+"Custom checkpointing with an external function as parameter":https://issues.apache.org/jira/browse/SPARK-2418?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22checkpoint%22
+"Automatically cleanup checkpoint":https://issues.apache.org/jira/browse/SPARK-2033?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22checkpoint%22
+"RDD.map(func) dependencies issue after checkpoint & count":https://issues.apache.org/jira/browse/SPARK-2408?jql=project%20%3D%20SPARK%20AND%20text%20~%20%22checkpoint%22

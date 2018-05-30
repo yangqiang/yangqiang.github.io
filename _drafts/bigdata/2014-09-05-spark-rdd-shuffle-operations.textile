@@ -1,0 +1,156 @@
+---
+layout: post
+title: "Spark RDD shuffle 分析提要"
+description: ""
+category: bigdata
+tags: [Spark,RDD,Shuffle]
+summary: 
+---
+{% include JB/setup %}
+
+h2. 要点
+
+# RDD 的 shuffle 类操作基本都定义在 PairedRDDFunctions（可以理解为 PairedRDD） 中，做 shuffle 操作时，必须指定 partition 方式。
+# HadoopRDD 的 partition 方式与 PairedRDD 方式不同，前者按 HDFS 中文件块为划分依据，后者根据 Key-Value 对中的 Key 值使用各种算法做划分。
+# PairedRDD 与 Hadoop MapReduce 框架中的 Key-Value 类型数据对应，在进行运算之前必须指定按 key 做 partition 操作的方法。
+
+h2. 几个概念
+
+h3. Partition
+
+每个 RDD 都会对应一些 Partitions，可以理解为数据分块。比如，读入 HDFS 上的数据时，Spark 会根据 HDFS 的 block 生成对应数目的 HadoopPartition。而 shuffle 操作会生成 ShuffledRDDPartition。
+
+h3. Partitioner
+
+数据的划分方式，包含两个信息：划分为多少块，如何划分。其目的，是为了得到 Partition 的列表，而 Partition 拥有多个子类，。
+
+<pre class="prettyprint scala">
+abstract class Partitioner extends Serializable {
+  def numPartitions: Int
+  def getPartition(key: Any): Int
+}
+</pre>
+
+从非 PairRDDFunctions 演化过来的 RDD，会使用 HashPartitioner：
+
+<pre class="prettyprint scala">
+object Partitioner {
+  def defaultPartitioner(rdd: RDD[_], others: RDD[_]*): Partitioner = {
+    val bySize = (Seq(rdd) ++ others).sortBy(_.partitions.size).reverse
+    for (r <- bySize if r.partitioner.isDefined) {
+      return r.partitioner.get
+    }
+    if (rdd.context.conf.contains("spark.default.parallelism")) {
+      new HashPartitioner(rdd.context.defaultParallelism)
+    } else {
+      new HashPartitioner(bySize.head.partitions.size)
+    }
+  }
+}
+</pre>
+
+h3. 局部性
+
+RDD 中的 getPreferredLocations 方法能够获取到适合对 partition 做处理的节点，即考虑局部性。
+比如，对于 join 类操作，最合理的划分方式是按照公共的 key 做划分。比如 val uc = comments.join(consumers) 之前，可以将 comments 和 consumers 的 Partitioner 变成以 u_id 为划分依据的 Partitioner。比如想划分为 100 个 partition，则实现 KeyPartitioner 时，可参考默认的 HashPartitioner 修改 getPartition 方法：
+
+<pre class="prettyprint scala">
+  def getPartition(key: Any): Int = key match {
+    case null => 0
+    case _ => Utils.nonNegativeMod(key.hashCode, numPartitions)
+  }
+</pre>
+
+->
+
+<pre  class="prettyprint scala">
+  def getPartition(key: Any): Int = key match {
+    case null => 0
+	case Tuple2(Any, Any) => Utils.nonNegativeMod(key._1.hashCode, numPartitions)
+    case _ => Utils.nonNegativeMod(key.hashCode, numPartitions)
+  }
+</pre>
+
+而对于 sortByKey 操作，采用桶排序的思想，以桶的上界为划分依据，已在 RangePartitioner 中实现。
+
+HadoopRDD 的 getPartitions 方法如下：默认按数据 HDFS 中的 block 做划分。
+val inputSplits = inputFormat.getSplits(jobConf, minPartitions) 这行代码可得到输入数据的 split 数。
+
+<pre class="prettyprint scala">
+  override def getPartitions: Array[Partition] = {
+    val jobConf = getJobConf()
+    // add the credentials here as this can be called before SparkContext initialized
+    SparkHadoopUtil.get.addCredentials(jobConf)
+    val inputFormat = getInputFormat(jobConf)
+    if (inputFormat.isInstanceOf[Configurable]) {
+      inputFormat.asInstanceOf[Configurable].setConf(jobConf)
+    }
+    val inputSplits = inputFormat.getSplits(jobConf, minPartitions)
+    val array = new Array[Partition](inputSplits.size)
+    for (i <- 0 until inputSplits.size) {
+      array(i) = new HadoopPartition(id, i, inputSplits(i))
+    }
+    array
+  }
+</pre>
+
+HadoopRDD 的 compute 方法如下，reader = inputFormat.getRecordReader(split.inputSplit.value, jobConf, Reporter.NULL) 这行代码即是根据 split 编号读取相应数据。
+
+<pre class="prettyprint scala">
+  override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
+    val iter = new NextIterator[(K, V)] {
+
+      val split = theSplit.asInstanceOf[HadoopPartition]
+      logInfo("Input split: " + split.inputSplit)
+      var reader: RecordReader[K, V] = null
+      val jobConf = getJobConf()
+      val inputFormat = getInputFormat(jobConf)
+      HadoopRDD.addLocalConfiguration(new SimpleDateFormat("yyyyMMddHHmm").format(createTime),
+        context.stageId, theSplit.index, context.attemptId.toInt, jobConf)
+      reader = inputFormat.getRecordReader(split.inputSplit.value, jobConf, Reporter.NULL)
+      ...
+    }
+    ...
+  }
+</pre>
+
+HadoopRDD 如何保证数据局部性？
+HadoopRDD.getPreferredLocations 方法可根据数据分块找到其所属节点。
+
+<pre class="prettyprint scala">
+  override def getPreferredLocations(split: Partition): Seq[String] = {
+    // TODO: Filtering out "localhost" in case of file:// URLs
+    val hadoopSplit = split.asInstanceOf[HadoopPartition]
+    hadoopSplit.inputSplit.value.getLocations.filter(_ != "localhost")
+  }
+</pre>
+
+Scheduler 模块会根据 location 信息来安排 task 分发，详见 TaskSetManager 类。
+
+那么，将 RDD 数据写入 HDFS 的过程中，是如何根据数据局部性来写的？如果 sort 之后，partition 数据各有差异，那么写回 HDFS 时是否会作出调整？
+下图是一个 sortByKey 的输出结果，可以看出，Partitioner（使用的是 RangePartitioner）无法保证每个 Partition 内的数据量相等。
+!/pics/sort-save-file.png!
+
+h2. 几种 shuffle 操作
+
+h3. combineByKey
+
+Turns an RDD[(K, V)] into a result of type RDD[(K, C)], for a "combined type" C
+是 groupByKey 操作的实现，默认使用 HashPartitioner 做划分。
+
+h3. partitionBy
+
+以指定的 partitioner 重新划分 RDD 中的数据。
+
+h3. cogroup
+
+For each key k in `this` or `other`, return a resulting RDD that contains a tuple with the list of values for that key in `this` as well as `other`.
+join 操作的实现。
+
+h3. subtractByKey
+
+Return an RDD with the pairs from `this` whose keys are not in `other`.
+
+h3. sortByKey
+
+按 key 做排序，这在 Hadoop MapReduce 中是默认完成的。
