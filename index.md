@@ -1,6 +1,6 @@
 ---
 layout: page
-title: Jonny的最新随笔
+title: 近期文章
 ---
 
 

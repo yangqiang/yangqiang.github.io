@@ -13,3 +13,4 @@ summary: 代码生成
 
 * [json schema 转 POJO（VO）](/assets/tools/jsonschema2java.html)
 * [json 转 POJO（VO）](/assets/tools/json2java.html)
+* [markdown 转 MySQL DDL](/assets/tools/md-to-mysql-ddl.html)

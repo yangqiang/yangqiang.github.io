@@ -5,7 +5,7 @@ permalink: /:categories/:year/:month/:day/:title
 plugins:
 - jekyll-textile-converter
 
-exclude: [".rvmrc", ".rbenv-version", "README.md", "Rakefile", "changelog.md", ".idea"]
+exclude: [".rvmrc", ".rbenv-version", "README.md", "Rakefile", "changelog.md", ".idea", "_drafts"]
 hightlighter: pygments
 mardown: redcarpet
 extensions: ["fenced_code_blocks", "tables", "highlight", "strikethrough"]
@@ -13,10 +13,10 @@ extensions: ["fenced_code_blocks", "tables", "highlight", "strikethrough"]
 # Themes are encouraged to use these universal variables 
 # so be sure to set them if your theme uses them.
 #
-title : Jonny的随笔
+title : 木弓
 tagline: Site Tagline
 author :
-  name : Jonny Young
+  name : 木弓
   email : yangqiangyq at foxmail dot com
   github : yangqiang
   twitter : username
