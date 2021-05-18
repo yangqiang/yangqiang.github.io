@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>text convert</title>
+  <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+  <script src="util/util.js"></script>
+  <script src="parser/json-schema.js"></script>
+  <script src="parser/json.js"></script>
+  <script src="parser/proto3.js"></script>
+  <script src="util/java-util.js"></script>
+  <script src="parser/java.js"></script>
+  <script src="parser/postgres.js"></script>
+  <script src="parser/table-md.js"></script>
+  <script src="parser/mysql.js"></script>
+  <script src="parser/supported-types.js"></script>
+  <script src="main.js"></script>
+  <style>
+    #id-input-div, #id-control-area, #id-output-div {
+      display: table-cell;
+    }
+    #id-from-type-div {
+      text-align: right;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="id-content-area">
+    <div id="id-input-div">
+      <div id="id-from-type-div">
+        <select id="id-from-type">
+          <option value="JSON_SCHEMA">json schema</option>
+          <option value="JSON">json</option>
+          <option value="TABLE_MD">table md</option>
+        </select>
+      </div>
+      <div id="input">
+        <textarea id="id-input" style="width: 500px; height: 500px"></textarea>
+      </div>
+    </div>
+    <div id="id-control-area">
+      <input id="id-convert" type="button" value=" --> ">
+    </div>
+    <div id="id-output-div">
+      <div id="id-to-type-div">
+        <select id="id-to-type">
+          <option value="JSON_SCHEMA">json schema</option>
+          <option value="JSON">json</option>
+          <option value="PROTO3">proto3</option>
+          <option value="JAVA">java</option>
+          <option value="POSTGRES">postgres</option>
+          <option value="MYSQL">mysql</option>
+        </select>
+      </div>
+      <div>
+        <textarea id="id-output" style="width: 500px; height: 500px"></textarea>
+      </div>
+    </div>
+  </div>
+  <div id="id-error-div">
+    <a id="id-error" style="color: red;"></a>
+  </div>
+  <!-- template codes -->
+  <div id="id-sample-JSON_SCHEMA" hidden="true">
+{
+  "type": "object",
+  "title": "empty object",
+  "properties": {
+    "k_int": {
+      "type": "integer",
+      "description": "1"
+    },
+    "k_double": {
+      "type": "number"
+    },
+    "k_object": {
+      "type": "object",
+      "properties": {
+        "a": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "required": [
+        "a"
+      ]
+    },
+    "k_bool": {
+      "type": "boolean"
+    },
+    "k_string": {
+      "type": "string"
+    },
+    "k_int_array": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "k_int_array_array": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "integer"
+        }
+      }
+    },
+    "k_object_array": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "a"
+        ]
+      }
+    },
+    "k_object_with_array_field": {
+      "type": "object",
+      "properties": {
+        "a": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      },
+      "required": [
+        "a"
+      ]
+    }
+  },
+  "required": [
+    "k_int",
+    "k_double",
+    "k_object",
+    "k_bool",
+    "k_string",
+    "k_int_array",
+    "k_int_array_array",
+    "k_object_array",
+    "k_object_with_array_field"
+  ]
+}
+  </div>
+  <div id="id-sample-JSON" hidden="true">
+{
+  "kint": 1,
+  "kdouble": 2.1,
+  "kobject": {"a": {}},
+  "kbool": true,
+  "kstring": "",
+  "kintarray": [1],
+  "kintarrayarray": [[1]],
+  "kobjectarray": [{"a": 1}],
+  "kobjectwitharrayfield": {"a": [1]}
+}
+  </div>
+  <div id="id-sample-JSON_TABLE" hidden="true">
+{
+  "name": "table_name",
+  "fields": [
+  {
+  "name": "int_field",
+  "description": "整型",
+  "required": true,
+  "type": "integer"
+  }
+  ],
+  "description": "表名称"
+}
+  </div>
+  <div id="id-sample-TABLE_MD" hidden="true">
+### 人群去重任务 crowd_remove_duplicate_task
+|字段| 字段类型|含义|是否必须(默认是)|
+|-|-|-|-|
+| id | varchar(36) | | |
+| createTime | datetime | 创建时间 | |
+| updateTime | datetime | 更新时间 | |
+| status | tinyint unsigned|状态|
+| calculations | json | 关联的交并差计算列表
+|result|json|计算结果|否
+|failure_reason|varchar(100)|失败原因|否
+  </div>
+</body>
+</html>
