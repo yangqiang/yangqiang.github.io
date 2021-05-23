@@ -2,6 +2,10 @@ function error(msg) {
   $('#id-error').text(msg);
 }
 
+function buildTypeMap() {
+  
+}
+
 function doConvert(event) {
   error("");
   var fromType = $('#id-from-type').val();
@@ -36,12 +40,35 @@ function doConvert(event) {
   $('#id-output').val(outputText);
 }
 
+
+function updateTypeSelect(obj, types) {
+  obj.empty();
+  for (var i in types) {
+    var type = types[i];
+    var option = '<option>' + type + '</option>';
+    obj.append(option);
+  }
+}
+
+function onChangeFromType(event) {
+  var fromType = $('#id-from-type').val();
+  var divId = '#id-sample-' + fromType;
+  $('#id-input').val($(divId).text());
+  $('#id-output').val('');
+  updateTypeSelect($('#id-to-type'), getToTypesOfFromType(fromType));
+}
+
 $(document).ready(function () {
+  var defaultFromType = TYPES.JSON_SCHEMA;
+  var fromTypes = [];
+  for (var fromType in FROM_TYPES) {
+    fromTypes.push(fromType);
+  }
+  updateTypeSelect($("#id-from-type"), fromTypes);
+  updateTypeSelect($('#id-to-type'), getToTypesOfFromType(defaultFromType));
   $('#id-convert').click(doConvert);
-  $('#id-from-type').change(function (e) {
-    var divId = '#id-sample-' + $('#id-from-type').val();
-    $('#id-input').val($(divId).text());
-  });
+  $('#id-to-type').change(doConvert);
+  $('#id-from-type').change(onChangeFromType);
   $('#id-input').val($('#id-sample-JSON_SCHEMA').text());
   $('#id-to-type').val('JAVA');
   // for debug
