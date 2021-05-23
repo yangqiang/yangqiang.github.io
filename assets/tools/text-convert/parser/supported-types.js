@@ -37,7 +37,7 @@ var MIDDLE_TYPES = getMiddleTypes();
 
 /**
  * from -> middle1 -> to
- * from -> moddle2 -> to
+ * from -> middle2 -> to
  * 
  * @returns object from: [middle1, middle2, ...]
  */
@@ -64,9 +64,9 @@ var FROM_TYPES = getFromTypes();
 
 /**
  * from -> middle1 -> to
- * from -> moddle2 -> to
+ * from -> middle2 -> to
  * 
- * @returns object moddle1: [to1, to2, ...]
+ * @returns object middle1: [to1, to2, ...]
  */
 function getToTypes() {
   var m = {};
