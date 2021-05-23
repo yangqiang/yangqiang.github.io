@@ -29,8 +29,8 @@ T_TABLE_MD.getTableName = function (line) {
   line = line.replace(/^#+/, '');
   line = UTIL.removePrefixAndPostfixSpace(line);
   const words = line.split(' ');
-  ret.name = words[1];
-  ret.description = words[0];
+  ret.name = words[words.length - 1];
+  ret.description = words.slice(0, words.length - 1).join(' ');
   return ret;
 };
 
