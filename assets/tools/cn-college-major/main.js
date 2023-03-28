@@ -71,6 +71,8 @@ function render_cate2_list() {
     $('#cate2-list').html(html);
     $('.cate2-item').click(
         function (e) {
+            $('.cate2-item').attr('class', 'cate2-item');
+            e.target.setAttribute('class', 'cate2-item selected');
             CATE2 = e.target.firstChild.nodeValue;
             render_major_list_of_cate2();
         }
@@ -120,6 +122,8 @@ $(document).ready(function () {
 
     $('.cate1-item').click(
         function (e) {
+            $('.cate1-item').attr('class', 'cate1-item');
+            e.target.setAttribute('class', 'cate1-item selected');
             CATE1 = e.target.firstChild.nodeValue;
             render_cate2_list();
             $('#major-list').html('');
@@ -128,6 +132,8 @@ $(document).ready(function () {
 
     $('#search').click(
         function(e) {
+            $('.cate1-item').attr('class', 'cate1-item');
+            $('.cate2-item').attr('class', 'cate2-item');
             let data = [];
             let k = $('#keyword').val();
             for (let i = 0; i < DATA.length; i += 1) {
